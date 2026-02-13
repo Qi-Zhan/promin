@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "promin"
+version = "0.1.0"
+description = "Program-driven animation from runtime semantics"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = ["manim>=0.18"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
