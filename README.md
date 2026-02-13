@@ -57,7 +57,7 @@ class BSTNode:
         return self.right.search(key) if self.right else False
 ```
 
-### 2. Record & render
+### 2. Record & Render
 
 ```python
 root = BSTNode(5)
@@ -142,7 +142,6 @@ class BPInternal:
 |-------------------------|--------------------------------------|
 | `examples/bst.py`      | Binary search tree insert & search   |
 | `examples/bptree.py`   | B+ tree insert & search              |
-| `examples/rbtree.py`   | Red-black tree data structure        |
 
 Run any example:
 
@@ -150,133 +149,3 @@ Run any example:
 python examples/bst.py       # → bst_search_4.mp4, bst_insert_9.mp4
 python examples/bptree.py    # → bptree_insert.mp4, bptree_search.mp4
 ```
-
-## Project Structure
-
-```
-src/promin/
-├── __init__.py   Public API
-├── view.py       Declarative visual specs (NodeView, EdgeSpec, View dispatch)
-├── trace.py      register_class, snapshot, StateMachine, record()
-└── render.py     Manim-based rendering, tree layout, diff-based animation
-```
-
-## License
-
-MIT
-
-### Configuration
-
-```python
-scene.config(
-    step_duration=0.5,   # base animation duration (seconds)
-    event_pause=0.1,     # pause between events
-    batch_steps=False,   # True: group iteration events into one AnimationGroup
-    max_steps=50,        # cap animated iterations (rest still execute)
-)
-```
-
-## Semantic Event System
-
-All events flow through a context-local `Tracer` stored in a `ContextVar`.
-Each event is a `(type, name, data, seq, timestamp)` record:
-
-| EventType | Emitted By | Data Fields |
-|---|---|---|
-| `VAR_CREATED` | `Var.__init__` | `value` |
-| `VAR_UPDATED` | `Var.set()`, `Var.append()` | `old_value`, `new_value` |
-| `STEP_START` | `step()` | `index`, `value` |
-| `STEP_END` | `step()` | `index` |
-| `PHASE_START` | `phase().__enter__` | user kwargs |
-| `PHASE_END` | `phase().__exit__` | user kwargs |
-| `CALL` | `@trace` wrapper | `args_count`, `kwargs_keys` |
-| `RETURN` | `@trace` wrapper | `has_result` |
-| `EMIT` | `emit()` | user kwargs |
-
-The `ComputationGraph` transforms the flat event stream into:
-- **Variable chains** — sequential updates to the same variable are linked.
-- **Step groups** — events within the same loop iteration are grouped.
-- **Phase nesting** — events within phase boundaries form subtrees.
-
-## Visual Primitives
-
-Bindings connect variable names to visual representations. The compiler
-replays events and routes each to matching bindings:
-
-```python
-scene.bind("x",        pm.NumberLineDot(range=(-1, 6)))       # scalar → dot on number line
-scene.bind("loss",     pm.LivePlot(color="red"))              # emit → growing scatter plot
-scene.bind("gradient", pm.GradientArrow(number_line=x_dot))  # emit → direction arrow
-scene.bind("tokens",   pm.DataTable(max_rows=15))             # list → visual table
-scene.bind("counter",  pm.ValueDisplay(fmt=".4f"))            # scalar → text readout
-scene.bind("iter",     pm.StepCounter())                      # iteration number
-```
-
-### Built-in Visuals
-
-| Visual | Best For | Listens To |
-|---|---|---|
-| `NumberLineDot` | Scalars, positions, parameters | `VAR_CREATED`, `VAR_UPDATED` |
-| `LivePlot` | Loss curves, metrics, convergence | `EMIT` (with `value`), `VAR_UPDATED` |
-| `ValueDisplay` | Monitoring scalars, counters | `VAR_CREATED`, `VAR_UPDATED`, `EMIT` |
-| `DataTable` | Token lists, arrays, dicts | `VAR_UPDATED` (list/dict) |
-| `GradientArrow` | Gradient direction + magnitude | `EMIT` (with `value`, `at`) |
-| `StepCounter` | Iteration number | `STEP_START` |
-
-### Custom Visuals
-
-Extend `pm.Visual` to create domain-specific visuals:
-
-```python
-class HeatmapGrid(pm.Visual):
-    def __init__(self, rows, cols, **kwargs):
-        self.rows = rows
-        self.cols = cols
-        # store config — no Manim imports in __init__
-
-    def create_mobjects(self) -> list:
-        # Called once — return initial Manim mobjects
-        from manim import Square, VGroup
-        ...
-        return [grid]
-
-    def animate_event(self, event: pm.Event) -> list:
-        # Called per matching event — return Manim animations
-        from manim import FadeToColor
-        ...
-        return [FadeToColor(cell, new_color)]
-```
-
-## Examples
-
-### Gradient Descent
-
-```bash
-python examples/gradient_descent.py           # dry-run: print trace
-python examples/gradient_descent.py --render  # produce video
-manim -pql examples/gradient_descent.py GradientDescentScene  # via Manim CLI
-```
-
-### Tokenizer
-
-```bash
-python examples/tokenizer_viz.py              # dry-run: print trace
-python examples/tokenizer_viz.py --render     # produce video
-manim -pql examples/tokenizer_viz.py TokenizerScene
-```
-
-## Key Properties
-
-- **Manim is lazy** — tracing and `preview()` work without Manim installed. Manim is only imported at render time.
-- **Var is transparent** — arithmetic operators delegate to the underlying value, so `Var` works in normal expressions (`x + 1`, `x * 2`).
-- **Adaptive pacing** — the compiler auto-slows early iterations (for clarity) and speeds up later ones.
-- **Batch mode** — `batch_steps=True` groups all events in one iteration into a single `AnimationGroup` for faster playback on high iteration counts.
-
-## Requirements
-
-- Python 3.10+
-- [Manim Community](https://docs.manim.community/) (only for rendering; dry-run works without it)
-
-## License
-
-MIT
