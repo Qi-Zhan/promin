@@ -334,8 +334,7 @@ if __name__ == "__main__":
             t.insert(k)
 
     sm.render(
-        path="rbtree_insert.mp4",
-        title="Red-Black Tree Insert",
+        path="media/rbtree_insert.mp4",
         config=pm.RenderConfig(background_color="#F5F0EB"),
     )
-    print("Rendered rbtree_insert.mp4")
+    print("Rendered media/rbtree_insert.mp4")

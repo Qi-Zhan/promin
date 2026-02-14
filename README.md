@@ -28,54 +28,63 @@ pip install -e .
 ### 1. Declare your data structure
 
 ```python
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Optional
 import promin as pm
 
-@pm.register_class(shape="circle", label="key", edges=["left", "right"])
-class BSTNode:
-    def __init__(self, key: int):
-        self.key = key
-        self.left = None
-        self.right = None
+RED, BLACK, NIL_KEY = "red", "black", "NIL"
 
-    def insert(self, key: int) -> None:
-        if key < self.key:
-            if self.left is None:
-                self.left = BSTNode(key)
-            else:
-                self.left.insert(key)
-        else:
-            if self.right is None:
-                self.right = BSTNode(key)
-            else:
-                self.right.insert(key)
-
-    def search(self, key: int) -> bool:
-        if key == self.key:
-            return True
-        if key < self.key:
-            return self.left.search(key) if self.left else False
-        return self.right.search(key) if self.right else False
+@pm.register_class(
+    shape="circle",
+    label="key",
+    edges=[
+        pm.EdgeSpec(field="left",  direction="left"),
+        pm.EdgeSpec(field="right", direction="right"),
+    ],
+    data=["color"],
+    color_field="color",
+    color_map={"red": "#CC0000", "black": "#1A1A1A"},
+    skip_if=lambda node: node.key == NIL_KEY,
+)
+@dataclass
+class RBNode:
+    key: int | str
+    color: str = RED
+    left:  Optional[RBNode] = None
+    right: Optional[RBNode] = None
+    parent: Optional[RBNode] = None
 ```
+
+The full Red-Black Tree implementation (rotations, insert fix-up, delete, etc.)
+lives in [`examples/rbtree.py`](examples/rbtree.py).
 
 ### 2. Record & Render
 
 ```python
-root = BSTNode(5)
-for k in [3, 7, 1, 4, 6, 8]:
-    root.insert(k)
+t = RedBlackTree()
+keys = [7, 3, 18, 10, 22, 8]
+t.insert(keys[0])
 
 sm = pm.StateMachine()
-sm.capture(root)
+sm.capture(t.root)
 
-with pm.record("Search for 4", sm):
-    root.search(4)
+with pm.record("RBTree insert", sm):
+    for k in keys[1:]:
+        t.insert(k)
 
-sm.render(path="bst_search.mp4")
+sm.render(
+    path="media/rbtree_insert.mp4",
+    config=pm.RenderConfig(background_color="#F5F0EB"),
+)
 ```
 
 `record()` uses `sys.settrace` to automatically capture a state snapshot every
 time the algorithm visits a registered-class object.  The renderer diffs
 consecutive snapshots and animates only the changes.
+
+
+<video src="media/rbtree_insert.mp4" controls width="100%"></video>
 
 ## How It Works
 
@@ -138,14 +147,16 @@ class BPInternal:
 
 ## Examples
 
-| File                    | Description                          |
-|-------------------------|--------------------------------------|
-| `examples/bst.py`      | Binary search tree insert & search   |
-| `examples/bptree.py`   | B+ tree insert & search              |
+| File                    | Description                          | Output                       |
+|-------------------------|--------------------------------------|------------------------------|
+| `examples/rbtree.py`   | Red-Black tree insert                | `media/rbtree_insert.mp4`    |
+| `examples/bst.py`      | Binary search tree insert & search   | `media/bst_*.mp4`            |
+| `examples/bptree.py`   | B+ tree insert & search              | `media/bptree_*.mp4`         |
 
-Run any example:
+Run any example (videos are written to `media/`):
 
 ```bash
-python examples/bst.py       # → bst_search_4.mp4, bst_insert_9.mp4
-python examples/bptree.py    # → bptree_insert.mp4, bptree_search.mp4
+python examples/rbtree.py    # → media/rbtree_insert.mp4
+python examples/bst.py       # → media/bst_search_4.mp4, media/bst_insert_9.mp4
+python examples/bptree.py    # → media/bptree_insert.mp4, media/bptree_search.mp4
 ```
