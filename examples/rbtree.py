@@ -335,5 +335,9 @@ if __name__ == "__main__":
         for k in keys[1:]:
             t.insert(k)
 
-    sm.render(path="rbtree_insert.mp4", title="Red-Black Tree Insert")
+    sm.render(
+        path="rbtree_insert.mp4",
+        title="Red-Black Tree Insert",
+        config=pm.RenderConfig(background_color="#FFFFFF"),
+    )
     print("Rendered rbtree_insert.mp4")

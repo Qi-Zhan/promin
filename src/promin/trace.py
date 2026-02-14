@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from .view import NodeView, EdgeSpec, normalize_edges, View, RegisteredClassView
-from .render import render_tree_text, render_states
+from .render import render_tree_text, render_states, RenderConfig
 
 logger = logging.getLogger(__name__)
 
@@ -453,7 +453,13 @@ class StateMachine:
         self.states.append(initial_state)
         logger.info("StateMachine.init: initial state captured")
 
-    def render(self, path: str = "", fps: int = 30, title: str = "") -> None:
+    def render(
+        self,
+        path: str = "",
+        fps: int = 30,
+        title: str = "",
+        config: RenderConfig | None = None,
+    ) -> None:
         """
         Render the recorded states.
 
@@ -468,6 +474,8 @@ class StateMachine:
             Frames per second (video only).
         title : str
             Title shown at the top of the video.
+        config : RenderConfig | None
+            Rendering options (background color, quality, etc.).
         """
         video_exts = {".mp4", ".mov", ".webm", ".gif"}
         if path and any(path.endswith(ext) for ext in video_exts):
@@ -477,7 +485,9 @@ class StateMachine:
                 fps,
                 title,
             )
-            out = render_states(self.states, path, fps=fps, title=title)
+            out = render_states(
+                self.states, path, fps=fps, title=title, config=config
+            )
             print(f"  ✓ Rendered {len(self.states)} states → {out}")
             return
 

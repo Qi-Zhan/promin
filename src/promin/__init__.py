@@ -28,4 +28,4 @@ from .view import (
     SetView,
     RegisteredClassView,
 )
-from .render import render_states, render_states_inline
+from .render import render_states, render_states_inline, RenderConfig

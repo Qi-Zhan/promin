@@ -54,6 +54,47 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# RenderConfig — user-facing rendering options
+# ---------------------------------------------------------------------------
+
+from dataclasses import dataclass, field as dc_field
+
+
+@dataclass
+class RenderConfig:
+    """Rendering options passed to ``StateMachine.render()``.
+
+    All fields have sensible defaults so you only need to specify
+    what you want to change.
+
+    Attributes
+    ----------
+    background_color : str
+        Scene background color (hex string, e.g. ``"#FFFFFF"`` for white).
+        Default is manim's default (``"#000000"``, black).
+    node_color : str
+        Default node fill color (hex).  Overridden by per-node ``color_field``.
+    edge_color : str
+        Color for edges / arrows (hex).
+    title_color : str
+        Color for the title text (hex).
+    text_color : str
+        Color for overlay text (location, counter).  ``"auto"`` picks
+        a contrasting color based on ``background_color``.
+    quality : str
+        Manim quality flag: ``"l"`` (low), ``"m"`` (medium),
+        ``"h"`` (high), ``"k"`` (4K).  Default ``"l"``.
+    """
+
+    background_color: str = ""  # empty → manim default (black)
+    node_color: str = ""       # empty → use NORMAL_FILL constant
+    edge_color: str = ""       # empty → GREY_B
+    title_color: str = ""      # empty → YELLOW_C
+    text_color: str = "auto"   # auto → contrast against background
+    quality: str = "l"         # l | m | h | k
+
+
+# ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
@@ -540,9 +581,15 @@ class _ManimStateRenderer:
     and only animates the changes between consecutive states.
     """
 
-    def __init__(self, scene: Scene, origin: np.ndarray | None = None):
+    def __init__(
+        self,
+        scene: Scene,
+        origin: np.ndarray | None = None,
+        config: RenderConfig | None = None,
+    ):
         self.scene = scene
         self.origin = origin if origin is not None else np.array([0.0, 0.5, 0.0])
+        self.config = config or RenderConfig()
         self._node_mobs: dict[int, VGroup] = {}
         self._edge_mobs: dict[tuple[int, int], Line] = {}
         self._overlay: list[VMobject] = []
@@ -626,14 +673,15 @@ class _ManimStateRenderer:
             anims.append(FadeIn(edge))
 
         # --- Overlay ---
+        overlay_color = self.config.text_color if self.config.text_color != "auto" else GREY_A
         if loc_text:
-            loc_mob = Text(loc_text, font="Menlo", font_size=16, color=GREY_A)
+            loc_mob = Text(loc_text, font="Menlo", font_size=16, color=overlay_color)
             loc_mob.to_edge(DOWN, buff=0.3)
             self._overlay.append(loc_mob)
             anims.append(FadeIn(loc_mob))
 
         if counter_text:
-            cm = Text(counter_text, font="Menlo", font_size=14, color=GREY_A)
+            cm = Text(counter_text, font="Menlo", font_size=14, color=overlay_color)
             cm.to_corner(DOWN + RIGHT * 0.1, buff=0.25)
             self._overlay.append(cm)
             anims.append(FadeIn(cm))
@@ -666,6 +714,7 @@ def render_states(
     path: str,
     fps: int = 30,
     title: str = "",
+    config: RenderConfig | None = None,
 ) -> Path:
     """
     Render a sequence of ``State`` objects into a manim video.
@@ -683,23 +732,27 @@ def render_states(
         Frames per second.
     title : str
         Optional title shown at the top of the video.
+    config : RenderConfig | None
+        Rendering options (background color, quality, etc.).
     """
+    cfg = config or RenderConfig()
     out = Path(path).resolve()
     logger.info("render_states: %d states -> %s", len(states), out)
 
     # Build the scene class source dynamically so we can invoke manim CLI
-    scene_src = _generate_scene_source(states, title=title)
+    scene_src = _generate_scene_source(states, title=title, config=cfg)
 
     with tempfile.TemporaryDirectory(prefix="promin_") as tmp:
         script = Path(tmp) / "_promin_scene.py"
         script.write_text(scene_src, encoding="utf-8")
 
+        quality_flag = f"-q{cfg.quality}"
         cmd = [
             sys.executable,
             "-m",
             "manim",
             "render",
-            "-ql",  # low quality for speed; user can override
+            quality_flag,
             "--fps",
             str(fps),
             "--media_dir",
@@ -727,9 +780,13 @@ def render_states(
     return out
 
 
-def _generate_scene_source(states: list, title: str = "") -> str:
+def _generate_scene_source(
+    states: list, title: str = "", config: RenderConfig | None = None
+) -> str:
     """Generate a self-contained Python source that defines ProminScene."""
     import json
+
+    cfg = config or RenderConfig()
 
     # Serialize states into JSON-safe dicts
     frames = []
@@ -742,23 +799,47 @@ def _generate_scene_source(states: list, title: str = "") -> str:
         )
     frames_json = json.dumps(frames, default=str)
 
+    # Resolve adaptive colors
+    bg = cfg.background_color or "#000000"
+    if cfg.text_color == "auto":
+        text_color = _contrast_text_color(bg)
+    else:
+        text_color = cfg.text_color or "#888888"
+    title_color = cfg.title_color or YELLOW_C
+    edge_color = cfg.edge_color or ""
+
+    # Background setup line
+    bg_line = ""
+    if cfg.background_color:
+        bg_line = f'self.camera.background_color = "{cfg.background_color}"'
+
     return textwrap.dedent(
         f"""\
         import json
         from manim import *
-        from promin.render import _ManimStateRenderer
+        from promin.render import _ManimStateRenderer, RenderConfig
 
         FRAMES = json.loads({frames_json!r})
 
         class ProminScene(Scene):
             def construct(self):
+                {bg_line}
                 title_text = {title!r}
+                title_color = {title_color!r}
                 if title_text:
-                    t = Text(title_text, font="Menlo", font_size=30, color=YELLOW_C)
+                    t = Text(title_text, font="Menlo", font_size=30, color=title_color)
                     t.to_edge(UP, buff=0.3)
                     self.play(FadeIn(t, shift=DOWN * 0.15), run_time=0.3)
 
-                renderer = _ManimStateRenderer(self)
+                cfg = RenderConfig(
+                    background_color={cfg.background_color!r},
+                    node_color={cfg.node_color!r},
+                    edge_color={cfg.edge_color!r},
+                    title_color={cfg.title_color!r},
+                    text_color={text_color!r},
+                    quality={cfg.quality!r},
+                )
+                renderer = _ManimStateRenderer(self, config=cfg)
                 n = len(FRAMES)
                 for i, frame in enumerate(FRAMES):
                     loc = frame.get("loc")
@@ -785,6 +866,7 @@ def render_states_inline(
     states: list,
     title: str = "",
     origin: np.ndarray | None = None,
+    config: RenderConfig | None = None,
 ) -> None:
     """
     Render states directly into an existing manim Scene (for embedding).
@@ -792,6 +874,7 @@ def render_states_inline(
     Use this when you have your own Scene subclass and want to embed
     the state animation as part of a larger video.
     """
+    cfg = config or RenderConfig()
     if origin is None:
         origin = np.array([0.0, 0.5, 0.0])
 
@@ -799,12 +882,16 @@ def render_states_inline(
         "render_states_inline: %d states, origin=%s", len(states), origin.tolist()
     )
 
+    if cfg.background_color:
+        scene.camera.background_color = cfg.background_color
+
+    title_color = cfg.title_color or YELLOW_C
     if title:
-        t = Text(title, font="Menlo", font_size=30, color=YELLOW_C)
+        t = Text(title, font="Menlo", font_size=30, color=title_color)
         t.to_edge(UP, buff=0.3)
         scene.play(FadeIn(t, shift=DOWN * 0.15), run_time=0.3)
 
-    renderer = _ManimStateRenderer(scene, origin=origin)
+    renderer = _ManimStateRenderer(scene, origin=origin, config=cfg)
     n = len(states)
     for i, state in enumerate(states):
         loc_text = f"S{i}  {state.current_loc}" if state.current_loc else ""
