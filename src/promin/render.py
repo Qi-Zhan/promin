@@ -673,7 +673,11 @@ class _ManimStateRenderer:
             anims.append(FadeIn(edge))
 
         # --- Overlay ---
-        overlay_color = self.config.text_color if self.config.text_color != "auto" else GREY_A
+        tc = self.config.text_color
+        if isinstance(tc, str) and tc == "auto":
+            overlay_color = GREY_A
+        else:
+            overlay_color = tc or GREY_A
         if loc_text:
             loc_mob = Text(loc_text, font="Menlo", font_size=16, color=overlay_color)
             loc_mob.to_edge(DOWN, buff=0.3)

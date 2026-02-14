@@ -52,12 +52,10 @@ SENTINEL = _make_nil()
 
 
 class RedBlackTree:
-    """Red-Black Tree with event logging."""
 
     def __init__(self):
         self.nil = SENTINEL
         self.root: RBNode = self.nil
-        self.events: list[tuple] = []
 
     # -- rotations ------------------------------------------------
 
@@ -323,7 +321,7 @@ if __name__ == "__main__":
 
     # ---- Render insert sequence ----
     t = RedBlackTree()
-    keys = [7, 3, 18, 10, 22]
+    keys = [7, 3, 18, 10, 22, 8]
 
     sm = pm.StateMachine()
     # We need to capture the non-sentinel nodes
@@ -338,6 +336,6 @@ if __name__ == "__main__":
     sm.render(
         path="rbtree_insert.mp4",
         title="Red-Black Tree Insert",
-        config=pm.RenderConfig(background_color="#FFFFFF"),
+        config=pm.RenderConfig(background_color="#F5F0EB"),
     )
     print("Rendered rbtree_insert.mp4")
