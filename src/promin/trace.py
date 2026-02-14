@@ -12,14 +12,17 @@ Core pipeline::
 from __future__ import annotations
 
 import copy
+import logging
 import dis
 import os
 import sys
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
-from .view import NodeView, EdgeSpec, normalize_edges, View, TreeView
+from .view import NodeView, EdgeSpec, normalize_edges, View, RegisteredClassView
 from .render import render_tree_text, render_states
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +49,7 @@ class _ClassInfo:
     type_name: str
     view: NodeView
     cls: type
+    skip_if: Optional[Callable] = None
 
     @property
     def fields(self) -> list[str]:
@@ -65,6 +69,9 @@ def register_class(
     edges: list[str | EdgeSpec] | None = None,
     data: list[str] | None = None,
     type_name: str = "",
+    color_field: str = "",
+    color_map: dict[str, str] | None = None,
+    skip_if: Optional[Callable] = None,
 ):
     """
     Decorator: register a class for automatic state tracking and visualization.
@@ -92,6 +99,14 @@ def register_class(
         Extra fields to track in snapshots (not rendered as connections).
     type_name : str
         Logical name for rendering (defaults to ``cls.__name__``).
+    color_field : str
+        Field name whose runtime value determines the node fill color.
+    color_map : dict[str, str]
+        Mapping from *color_field* values to actual color strings.
+    skip_if : callable | None
+        Predicate ``(obj) -> bool``.  When it returns ``True`` the object
+        is treated as ``None`` during snapshotting (useful for sentinel
+        nodes in Red-Black trees, etc.).
     """
 
     def decorator(cls):
@@ -101,10 +116,20 @@ def register_class(
             label=label,
             edges=normalize_edges(edges or []),
             data=data or [],
+            color_field=color_field,
+            color_map=color_map or {},
         )
-        _registered_classes[cls] = _ClassInfo(type_name=name, view=view, cls=cls)
-        # Also register in the View dispatch system so View.for_value works
-        View.register(cls, lambda: TreeView())
+        _registered_classes[cls] = _ClassInfo(type_name=name, view=view, cls=cls, skip_if=skip_if)
+        logger.info(
+            "register_class: %s shape=%s label=%s edges=%d data=%d",
+            name,
+            shape,
+            label,
+            len(view.edges),
+            len(view.data),
+        )
+        # Register in the View dispatch system — carries the full NodeView spec
+        View.register(cls, lambda v=view: RegisteredClassView(v))
         return cls
 
     return decorator
@@ -148,6 +173,10 @@ def _snapshot_obj_inner(
     info = _registered_classes.get(type(obj))
     if info is None:
         return copy.deepcopy(obj)
+
+    # skip_if predicate — treat excluded objects as None (e.g. sentinel nodes)
+    if info.skip_if is not None and info.skip_if(obj):
+        return None
 
     oid = id(obj)
     if oid in seen:
@@ -269,11 +298,6 @@ def _collect_nodes(snapshot: Any) -> dict[int, dict]:
     return {n["_id"]: n for n in _iter_snapshot_nodes(snapshot)}
 
 
-def _collect_snapshot_ids(snapshot: Any) -> set[int]:
-    """Collect all node ``_id`` values from a snapshot tree (or list)."""
-    return {n["_id"] for n in _iter_snapshot_nodes(snapshot)}
-
-
 def _find_focus_id(snapshot: Any) -> Optional[int]:
     """Return the ``_id`` of the focused node, or ``None``."""
     return next(
@@ -352,13 +376,14 @@ def compute_transition(old_snap: Any, new_snap: Any) -> Transition:
                     )
                 )
 
-    return Transition(
+    transition = Transition(
         added=added,
         removed=removed,
         modified=modified,
         old_focus_id=_find_focus_id(old_snap),
         new_focus_id=_find_focus_id(new_snap),
     )
+    return transition
 
 
 # _find_key_by_id replaced by _find_label_by_id (defined above)
@@ -426,6 +451,7 @@ class StateMachine:
         assert len(self.states) == 0, "StateMachine already initialized"
         initial_state = State.init(self.captured_objects)
         self.states.append(initial_state)
+        logger.info("StateMachine.init: initial state captured")
 
     def render(self, path: str = "", fps: int = 30, title: str = "") -> None:
         """
@@ -445,6 +471,12 @@ class StateMachine:
         """
         video_exts = {".mp4", ".mov", ".webm", ".gif"}
         if path and any(path.endswith(ext) for ext in video_exts):
+            logger.info(
+                "StateMachine.render: video path=%s fps=%d title=%s",
+                path,
+                fps,
+                title,
+            )
             out = render_states(self.states, path, fps=fps, title=title)
             print(f"  ✓ Rendered {len(self.states)} states → {out}")
             return
@@ -453,6 +485,7 @@ class StateMachine:
         bar = "═" * 60
         print(f"\n{bar}")
         print(f"  StateMachine: {len(self.states)} states")
+        logger.info("StateMachine.render: text mode states=%d", len(self.states))
         print(f"{bar}\n")
 
         for i, state in enumerate(self.states):
@@ -508,6 +541,9 @@ class _RecordContext:
         self._base_dir = os.getcwd()
         self._lib_dir = os.path.dirname(os.path.abspath(__file__))
         self._trace_current = trace_current
+        logger.info(
+            "record: scope=%s trace_current=%s", scope_name, trace_current
+        )
 
     # ---- helpers ---------------------------------------------------------
 

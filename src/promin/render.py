@@ -13,6 +13,7 @@ assumptions about field names (like ``"key"`` or ``"left"``).
 
 from __future__ import annotations
 
+import logging
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,9 @@ from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
+
+from .view import View
+
 from manim import (
     BLUE_C,
     DOWN,
@@ -29,6 +33,7 @@ from manim import (
     RIGHT,
     UP,
     WHITE,
+    BLACK as MANIM_BLACK,
     YELLOW_C,
     Arrow,
     Circle,
@@ -42,7 +47,10 @@ from manim import (
     Text,
     VGroup,
     VMobject,
+    ManimColor,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +88,8 @@ def _get_view(snapshot: dict) -> dict:
         "edges": [e["field"] for e in view.get("edges", [])],
         "edge_specs": view.get("edges", []),
         "data": view.get("data", []),
+        "color_field": view.get("color_field", ""),
+        "color_map": view.get("color_map", {}),
     }
 
 
@@ -92,26 +102,55 @@ def _get_label(snapshot: dict) -> str:
     return str(snapshot.get("_type", "?"))
 
 
+def _get_node_color(snapshot: dict) -> Optional[str]:
+    """Return the resolved fill color string for a snapshot node, or None."""
+    view = _get_view(snapshot)
+    color_field = view["color_field"]
+    if not color_field:
+        return None
+    field_value = snapshot.get(color_field)
+    if field_value is None:
+        return None
+    color_map = view["color_map"]
+    if color_map:
+        return color_map.get(str(field_value))
+    # If no map, try using the raw value as a color string
+    return str(field_value)
+
+
+def _contrast_text_color(fill_hex: str) -> str:
+    """Return WHITE or BLACK text color for readability on *fill_hex*.
+
+    Uses the W3C relative luminance formula.
+    """
+    hex_str = fill_hex.lstrip("#")
+    if len(hex_str) == 3:
+        hex_str = "".join(c * 2 for c in hex_str)
+    try:
+        r, g, b = int(hex_str[0:2], 16), int(hex_str[2:4], 16), int(hex_str[4:6], 16)
+    except (ValueError, IndexError):
+        return WHITE  # fallback
+    luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
+    return MANIM_BLACK if luminance > 0.5 else WHITE
+
+
 def _format_label_value(val: Any) -> str:
-    """Format a label value for display, handling complex types."""
-    if val is None:
-        return "∅"
+    """Format a snapshot label value for display.
+
+    Registered-class snapshot dicts (those with ``_type``) are handled
+    specially because they are serialized dicts rather than live objects.
+    Everything else is delegated to :meth:`View.format_value`, which
+    dispatches through the View system.
+    """
     if isinstance(val, dict) and "_type" in val:
-        # Registered object — show its own label recursively
+        # Serialized registered object — drill into its own label field
         inner_view = _get_view(val)
         inner_label = inner_view["label"]
         if inner_label and inner_label in val:
             return _format_label_value(val[inner_label])
         return str(val.get("_type", "?"))
-    if isinstance(val, (list, tuple)):
-        items = [_format_label_value(item) for item in val]
-        bracket = "[" if isinstance(val, list) else "("
-        close = "]" if isinstance(val, list) else ")"
-        return bracket + ", ".join(items) + close
-    if isinstance(val, dict):
-        items = [f"{k}: {_format_label_value(v)}" for k, v in val.items()]
-        return "{" + ", ".join(items) + "}"
-    return str(val)
+    # Delegate primitives and containers to the View dispatch system
+    return View.format_value(val)
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +211,7 @@ class LayoutNode:
         "focused",
         "type_name",
         "shape",
+        "fill_color",
         "edge_styles",
         "x",
         "y",
@@ -189,6 +229,7 @@ class LayoutNode:
         view = _get_view(snapshot)
         self.shape: str = view["shape"]
         self.label: str = _get_label(snapshot)
+        self.fill_color: Optional[str] = _get_node_color(snapshot)
 
         # Collect child sub-trees from edge fields only
         self.child_fields: list[str] = []
@@ -334,13 +375,13 @@ def _flatten_nodes(node: Optional[LayoutNode]) -> list[LayoutNode]:
 def _collect_node_info(
     root: LayoutNode,
     origin: np.ndarray,
-) -> dict[int, tuple[str, np.ndarray, bool, str]]:
-    """Collect ``{node_id: (label, position, focused, shape)}`` from layout."""
-    info: dict[int, tuple[str, np.ndarray, bool, str]] = {}
+) -> dict[int, tuple[str, np.ndarray, bool, str, Optional[str]]]:
+    """Collect ``{node_id: (label, position, focused, shape, fill_color)}`` from layout."""
+    info: dict[int, tuple[str, np.ndarray, bool, str, Optional[str]]] = {}
 
     def walk(n: LayoutNode) -> None:
         if n.node_id is not None:
-            info[n.node_id] = (n.label, _node_pos(n, origin), n.focused, n.shape)
+            info[n.node_id] = (n.label, _node_pos(n, origin), n.focused, n.shape, n.fill_color)
         for c in n.children:
             if c is not None:
                 walk(c)
@@ -388,16 +429,36 @@ def _make_node_mob(
     pos: np.ndarray,
     focused: bool = False,
     shape: str = "circle",
+    fill_color: Optional[str] = None,
 ) -> VGroup:
-    """Create a shape + label for a node."""
-    if focused:
+    """Create a shape + label for a node.
+
+    Parameters
+    ----------
+    fill_color : str | None
+        If given, a hex color string (e.g. ``"#CC0000"``) used as the
+        node fill.  Text color is automatically chosen for contrast.
+    """
+    # Determine colors
+    if fill_color:
+        fill = ManimColor(fill_color)
+        stroke_c = ManimColor(fill_color)
+        opacity = 0.85
+        stroke_w = FOCUS_STROKE if focused else 2.5
+        txt_color = _contrast_text_color(fill_color)
+        if focused:
+            stroke_c = FOCUS_COLOR
+            stroke_w = FOCUS_STROKE + 1.0
+    elif focused:
         fill, stroke_c = FOCUS_COLOR, FOCUS_COLOR
         opacity = FOCUS_FILL_OPACITY
         stroke_w = FOCUS_STROKE
+        txt_color = WHITE
     else:
         fill, stroke_c = NORMAL_FILL, NORMAL_FILL
         opacity = NORMAL_FILL_OPACITY
         stroke_w = 2.0
+        txt_color = WHITE
 
     if shape == "box":
         body = Rectangle(
@@ -420,7 +481,7 @@ def _make_node_mob(
             fill_opacity=opacity,
             stroke_width=stroke_w,
         )
-        txt = Text(str(label), font="Menlo", font_size=18, color=WHITE)
+        txt = Text(str(label), font="Menlo", font_size=18, color=txt_color)
         return VGroup(body, txt).move_to(pos)
     else:  # "circle" and fallback
         body = Circle(
@@ -431,7 +492,7 @@ def _make_node_mob(
             stroke_width=stroke_w,
         )
 
-    txt = Text(str(label), font="Menlo", font_size=20, color=WHITE)
+    txt = Text(str(label), font="Menlo", font_size=20, color=txt_color)
     return VGroup(body, txt).move_to(pos)
 
 
@@ -532,8 +593,8 @@ class _ManimStateRenderer:
 
         # --- Transform persistent nodes (position + focus style + shape) ---
         for nid in old_nids & new_nids:
-            lbl, pos, focused, shp = new_info[nid]
-            target = _make_node_mob(lbl, pos, focused, shp)
+            lbl, pos, focused, shp, fc = new_info[nid]
+            target = _make_node_mob(lbl, pos, focused, shp, fill_color=fc)
             anims.append(ReplacementTransform(self._node_mobs[nid], target))
             self._node_mobs[nid] = target
 
@@ -541,8 +602,8 @@ class _ManimStateRenderer:
         for eid in old_eids & new_eids:
             pid, cid = eid
             style = new_edges[eid]
-            _, p1, _, s1 = new_info[pid]
-            _, p2, _, s2 = new_info[cid]
+            _, p1, _, s1, _ = new_info[pid]
+            _, p2, _, s2, _ = new_info[cid]
             new_edge = _make_edge(p1, p2, style, s1, s2)
             new_edge.set_z_index(-1)
             anims.append(ReplacementTransform(self._edge_mobs[eid], new_edge))
@@ -550,15 +611,15 @@ class _ManimStateRenderer:
 
         # --- FadeIn new nodes / edges ---
         for nid in new_nids - old_nids:
-            lbl, pos, focused, shp = new_info[nid]
-            mob = _make_node_mob(lbl, pos, focused, shp)
+            lbl, pos, focused, shp, fc = new_info[nid]
+            mob = _make_node_mob(lbl, pos, focused, shp, fill_color=fc)
             self._node_mobs[nid] = mob
             anims.append(FadeIn(mob))
         for eid in new_eids - old_eids:
             pid, cid = eid
             style = new_edges[eid]
-            _, p1, _, s1 = new_info[pid]
-            _, p2, _, s2 = new_info[cid]
+            _, p1, _, s1, _ = new_info[pid]
+            _, p2, _, s2, _ = new_info[cid]
             edge = _make_edge(p1, p2, style, s1, s2)
             edge.set_z_index(-1)
             self._edge_mobs[eid] = edge
@@ -624,6 +685,7 @@ def render_states(
         Optional title shown at the top of the video.
     """
     out = Path(path).resolve()
+    logger.info("render_states: %d states -> %s", len(states), out)
 
     # Build the scene class source dynamically so we can invoke manim CLI
     scene_src = _generate_scene_source(states, title=title)
@@ -649,6 +711,7 @@ def render_states(
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
+            logger.error("render_states: manim stderr: %s", result.stderr)
             print("manim stderr:", result.stderr)
             raise RuntimeError(f"manim render failed (exit {result.returncode})")
 
@@ -659,6 +722,7 @@ def render_states(
 
             out.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(candidates[0]), str(out))
+            logger.info("render_states: moved output to %s", out)
 
     return out
 
@@ -730,6 +794,10 @@ def render_states_inline(
     """
     if origin is None:
         origin = np.array([0.0, 0.5, 0.0])
+
+    logger.info(
+        "render_states_inline: %d states, origin=%s", len(states), origin.tolist()
+    )
 
     if title:
         t = Text(title, font="Menlo", font_size=30, color=YELLOW_C)

@@ -26,7 +26,6 @@ from .view import (
     DictView,
     TupleView,
     SetView,
-    TreeView,
-    UserView,
+    RegisteredClassView,
 )
 from .render import render_states, render_states_inline

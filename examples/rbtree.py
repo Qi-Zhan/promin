@@ -2,6 +2,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+import promin as pm
+
 
 # =====================================================================
 # Red-Black Tree data structure
@@ -12,6 +14,21 @@ BLACK = "black"
 NIL_KEY = "NIL"
 
 
+@pm.register_class(
+    shape="circle",
+    label="key",
+    edges=[
+        pm.EdgeSpec(field="left", direction="left"),
+        pm.EdgeSpec(field="right", direction="right"),
+    ],
+    data=["color"],
+    color_field="color",
+    color_map={
+        "red": "#CC0000",
+        "black": "#1A1A1A",
+    },
+    skip_if=lambda node: node.key == NIL_KEY,
+)
 @dataclass
 class RBNode:
     key: int | str
@@ -303,3 +320,20 @@ def test_rbtree():
 
 if __name__ == "__main__":
     test_rbtree()
+
+    # ---- Render insert sequence ----
+    t = RedBlackTree()
+    keys = [7, 3, 18, 10, 22]
+
+    sm = pm.StateMachine()
+    # We need to capture the non-sentinel nodes
+    # Insert the first key to get a root
+    t.insert(keys[0])
+    sm.capture(t.root)
+
+    with pm.record("RBTree insert", sm):
+        for k in keys[1:]:
+            t.insert(k)
+
+    sm.render(path="rbtree_insert.mp4", title="Red-Black Tree Insert")
+    print("Rendered rbtree_insert.mp4")

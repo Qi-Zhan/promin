@@ -80,12 +80,21 @@ class NodeView:
         Fields that are structural connections to other nodes.
     data : list[str]
         Extra fields tracked in snapshots but not rendered as edges.
+    color_field : str
+        Field name whose runtime value determines the node fill color.
+        The value is looked up in *color_map* to get the actual color string.
+        If empty, the default renderer color is used.
+    color_map : dict[str, str]
+        Mapping from field value to CSS/manim color string.
+        Example: ``{"red": "#CC0000", "black": "#1A1A1A"}``.
     """
 
     shape: str = "circle"
     label: str = ""
     edges: list[EdgeSpec] = field(default_factory=list)
     data: list[str] = field(default_factory=list)
+    color_field: str = ""
+    color_map: dict[str, str] = field(default_factory=dict)
 
     # -- derived helpers --------------------------------------------------
 
@@ -113,7 +122,7 @@ class NodeView:
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-safe dict for embedding in snapshots."""
-        return {
+        d: dict[str, Any] = {
             "shape": self.shape,
             "label": self.label,
             "edges": [
@@ -122,6 +131,11 @@ class NodeView:
             ],
             "data": self.data,
         }
+        if self.color_field:
+            d["color_field"] = self.color_field
+        if self.color_map:
+            d["color_map"] = self.color_map
+        return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> NodeView:
@@ -138,6 +152,8 @@ class NodeView:
                 for e in d.get("edges", [])
             ],
             data=d.get("data", []),
+            color_field=d.get("color_field", ""),
+            color_map=d.get("color_map", {}),
         )
 
 
@@ -191,6 +207,14 @@ class View:
         """
         raise NotImplementedError
 
+    def format_label(self, value: Any) -> str:
+        """Format *value* as a short display string (used in node labels).
+
+        Each View subclass overrides this so the formatting is fully
+        dispatched through the View system.
+        """
+        return str(value)
+
     @staticmethod
     def register(value_type: type, view_factory: Callable[[], View]) -> None:
         """Register a view factory for a specific value type."""
@@ -203,6 +227,22 @@ class View:
             if cls in View._type_to_view:
                 return View._type_to_view[cls]()
         raise TypeError(f"No view registered for {type(value).__name__}")
+
+    @classmethod
+    def format_value(cls, value: Any) -> str:
+        """Format any Python value as display text via View dispatch.
+
+        This is the single entry point used by the renderer to produce
+        node-label strings.  Each registered View subclass controls how
+        its type is formatted.
+        """
+        if value is None:
+            return NoneView().format_label(value)
+        try:
+            view = cls.for_value(value)
+            return view.format_label(value)
+        except TypeError:
+            return repr(value)
 
     @classmethod
     def render_value(cls, value: Any, style: Optional[StyleContext] = None) -> Any:
@@ -229,12 +269,18 @@ class StrView(View):
     def render(self, value: Any, style: Optional[StyleContext] = None) -> Any:
         return {"type": "str", "value": value, "style": style}
 
+    def format_label(self, value: Any) -> str:
+        return str(value)
+
 
 class BoolView(View):
     """View for bool — displays True/False."""
 
     def render(self, value: Any, style: Optional[StyleContext] = None) -> Any:
         return {"type": "bool", "value": value, "style": style}
+
+    def format_label(self, value: Any) -> str:
+        return str(value)
 
 
 class NoneView(View):
@@ -243,6 +289,9 @@ class NoneView(View):
     def render(self, value: Any, style: Optional[StyleContext] = None) -> Any:
         return {"type": "none", "value": None, "style": style}
 
+    def format_label(self, value: Any) -> str:
+        return "\u2205"  # ∅
+
 
 class IntView(View):
     """View for int — single box with the value."""
@@ -250,12 +299,18 @@ class IntView(View):
     def render(self, value: Any, style: Optional[StyleContext] = None) -> Any:
         return {"type": "int", "value": value, "style": style}
 
+    def format_label(self, value: Any) -> str:
+        return str(value)
+
 
 class FloatView(View):
     """View for float — single box with the value."""
 
     def render(self, value: Any, style: Optional[StyleContext] = None) -> Any:
         return {"type": "float", "value": value, "style": style}
+
+    def format_label(self, value: Any) -> str:
+        return str(value)
 
 
 class ListView(View):
@@ -265,6 +320,10 @@ class ListView(View):
         items = [View.render_value(item) for item in value]
         return {"type": "list", "items": items, "style": style}
 
+    def format_label(self, value: Any) -> str:
+        items = [View.format_value(item) for item in value]
+        return "[" + ", ".join(items) + "]"
+
 
 class DictView(View):
     """View for dict — key-value table."""
@@ -272,6 +331,10 @@ class DictView(View):
     def render(self, value: Any, style: Optional[StyleContext] = None) -> Any:
         items = {k: View.render_value(v) for k, v in value.items()}
         return {"type": "dict", "items": items, "style": style}
+
+    def format_label(self, value: Any) -> str:
+        items = [f"{k}: {View.format_value(v)}" for k, v in value.items()]
+        return "{" + ", ".join(items) + "}"
 
 
 class TupleView(View):
@@ -281,6 +344,10 @@ class TupleView(View):
         items = [View.render_value(item) for item in value]
         return {"type": "tuple", "items": items, "style": style}
 
+    def format_label(self, value: Any) -> str:
+        items = [View.format_value(item) for item in value]
+        return "(" + ", ".join(items) + ")"
+
 
 class SetView(View):
     """View for set — unordered collection of unique items."""
@@ -289,23 +356,37 @@ class SetView(View):
         items = [View.render_value(item) for item in value]
         return {"type": "set", "items": items, "style": style}
 
+    def format_label(self, value: Any) -> str:
+        items = [View.format_value(item) for item in value]
+        return "{" + ", ".join(items) + "}"
 
-class TreeView(View):
-    """View for tree-like objects — renders as a node graph."""
+
+class RegisteredClassView(View):
+    """View for a ``@register_class``-decorated type.
+
+    Unlike the generic built-in views this one carries the full
+    :class:`NodeView` specification (shape, label field, edges, data)
+    so that ``View.for_value(obj)`` returns a view that actually knows
+    how to describe the node.
+    """
+
+    def __init__(self, node_view: NodeView):
+        self.node_view = node_view
 
     def render(self, value: Any, style: Optional[StyleContext] = None) -> Any:
-        return {"type": "tree", "root": value, "style": style}
+        return {
+            "type": "registered_node",
+            "node_view": self.node_view.to_dict(),
+            "value": value,
+            "style": style,
+        }
 
-
-class UserView(View):
-    """Fully user-defined view with custom shape and label."""
-
-    def __init__(self, shape: str = "box", label: str = ""):
-        self.shape = shape
-        self.label = label
-
-    def render(self, value: Any, style: Optional[StyleContext] = None) -> Any:
-        return {"type": "user", "shape": self.shape, "value": value, "style": style}
+    def format_label(self, value: Any) -> str:
+        lf = self.node_view.label
+        if lf:
+            val = getattr(value, lf, None)
+            return View.format_value(val)
+        return type(value).__name__
 
 
 # ---------------------------------------------------------------------------
@@ -321,20 +402,3 @@ View.register(list, lambda: ListView())
 View.register(dict, lambda: DictView())
 View.register(tuple, lambda: TupleView())
 View.register(set, lambda: SetView())
-
-
-# ---------------------------------------------------------------------------
-# Visual vocabulary constants
-# ---------------------------------------------------------------------------
-
-SHAPES: dict[str, str] = {
-    "circle": "Circle node (default for trees)",
-    "box": "Rectangle box",
-    "diamond": "Decision diamond",
-}
-
-EDGE_STYLES: dict[str, str] = {
-    "solid": "Normal solid line (default)",
-    "dashed": "Dashed line",
-    "dotted": "Dotted line",
-}
