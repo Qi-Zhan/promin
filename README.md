@@ -1,13 +1,4 @@
-# promin
-
-**Automatic algorithm visualization powered by Manim.**
-
-Decorate your data-structure class, run an algorithm, get a video — no
-animation code required.  Change the input and the video changes with it.
-
-```
-register_class → record() → StateMachine → .render("out.mp4")
-```
+# promin: Automatic program visualization powered by Manim.
 
 ## Installation
 
@@ -28,7 +19,6 @@ pip install -e .
 ### 1. Declare your data structure
 
 ```python
-from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 import promin as pm
@@ -65,26 +55,21 @@ lives in [`examples/rbtree.py`](examples/rbtree.py).
 t = RedBlackTree()
 keys = [7, 3, 18, 10, 22, 8]
 t.insert(keys[0])
-
+# Initialize the state machine and capture the initial tree state
 sm = pm.StateMachine()
 sm.capture(t.root)
-
+# Record the insertions of the remaining keys
 with pm.record("RBTree insert", sm):
     for k in keys[1:]:
         t.insert(k)
-
+# Finally, render the captured states to a video
 sm.render(
     path="media/rbtree_insert.mp4",
     config=pm.RenderConfig(background_color="#F5F0EB"),
 )
 ```
 
-`record()` uses `sys.settrace` to automatically capture a state snapshot every
-time the algorithm visits a registered-class object.  The renderer diffs
-consecutive snapshots and animates only the changes.
-
-
-<video src="media/rbtree_insert.mp4" controls width="100%"></video>
+![Red-Black Tree Insert](media/rbtree_insert.gif)
 
 ## How It Works
 
