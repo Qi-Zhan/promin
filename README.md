@@ -18,8 +18,8 @@ uv sync --group dev
 # Run tests
 uv run -m pytest
 
-# Run an example
-uv run python examples/rbtree.py
+# Run an example (small output)
+uv run python examples/bst.py
 ```
 
 ## Quick Start
@@ -27,58 +27,42 @@ uv run python examples/rbtree.py
 ### 1. Declare your data structure
 
 ```python
-from dataclasses import dataclass
-from typing import Optional
 import promin as pm
-
-RED, BLACK, NIL_KEY = "red", "black", "NIL"
 
 @pm.register_type(
     layout={"name": "tree", "params": {}},
     shape="circle",
     label="key",
-    edges=[
-        pm.EdgeSpec(field="left",  direction="left"),
-        pm.EdgeSpec(field="right", direction="right"),
-    ],
-    data=["color"],
-    color_field="color",
-    color_map={"red": "#CC0000", "black": "#1A1A1A"},
-    skip_if=lambda node: node.key == NIL_KEY,
+    edges=["left", "right"],
 )
-@dataclass
-class RBNode:
-    key: int | str
-    color: str = RED
-    left:  Optional[RBNode] = None
-    right: Optional[RBNode] = None
-    parent: Optional[RBNode] = None
+class BSTNode:
+    def __init__(self, key: int):
+        self.key = key
+        self.left = None
+        self.right = None
 ```
 
-The full Red-Black Tree implementation (rotations, insert fix-up, delete, etc.)
-lives in [`examples/rbtree.py`](examples/rbtree.py).
+完整示例见 [`examples/bst.py`](examples/bst.py)。
 
 ### 2. Record & Render
 
 ```python
-t = RedBlackTree()
-keys = [7, 3, 18, 10, 22, 8]
-t.insert(keys[0])
-# Initialize the state machine and capture the initial tree state
+root = BSTNode(5)
+root.left = BSTNode(3)
+root.right = BSTNode(7)
+
 sm = pm.StateMachine()
-sm.capture(t)
-# Record the insertions of the remaining keys
-with pm.record("RBTree insert", sm):
-    for k in keys[1:]:
-        t.insert(k)
-# Finally, render the captured states to a video
+sm.capture(root)
+
+with pm.record("Search for 4", sm):
+    pass
+
 sm.render(
-    path="media/rbtree_insert.gif",
-    config=pm.RenderConfig(background_color="#F5F0EB"),
+    path="media/bst_search_4.gif",
 )
 ```
 
-![Red-Black Tree Insert](media/rbtree_insert.gif)
+![BST Search](media/bst_search_4.gif)
 
 ## How It Works
 
