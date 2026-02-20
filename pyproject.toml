@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
 
 [project]
 name = "promin"
@@ -11,8 +11,8 @@ license = "MIT"
 requires-python = ">=3.10"
 dependencies = ["manim>=0.18"]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = ["pytest"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/promin"]

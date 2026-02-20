@@ -1000,7 +1000,6 @@ def render_states(
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             logger.error("render_states: manim stderr: %s", result.stderr)
-            print("manim stderr:", result.stderr)
             raise RuntimeError(f"manim render failed (exit {result.returncode})")
 
         # manim puts the file somewhere under media_dir — find it

@@ -1,18 +1,26 @@
 # promin: Automatic program visualization powered by Manim.
 
-## Installation
+## Setup (uv)
 
 ```bash
-# Requires Python ≥ 3.10 and Manim ≥ 0.18
-pip install -e .
+# Install project + runtime dependencies
+uv sync
+
+# Install development dependencies (pytest, etc.)
+uv sync --group dev
 ```
 
-> **Tip:** If you use conda, create an environment with Manim first:
-> ```bash
-> conda create -n manim python=3.12 manim -c conda-forge
-> conda activate manim
-> pip install -e .
-> ```
+> Requires Python >= 3.10. If you don't have `uv` yet: https://docs.astral.sh/uv/
+
+## Common Commands
+
+```bash
+# Run tests
+uv run -m pytest
+
+# Run an example
+uv run python examples/rbtree.py
+```
 
 ## Quick Start
 
@@ -57,7 +65,7 @@ keys = [7, 3, 18, 10, 22, 8]
 t.insert(keys[0])
 # Initialize the state machine and capture the initial tree state
 sm = pm.StateMachine()
-sm.capture(t.root)
+sm.capture(t)
 # Record the insertions of the remaining keys
 with pm.record("RBTree insert", sm):
     for k in keys[1:]:
@@ -86,7 +94,7 @@ sm.render(
 
 | Parameter   | Type                        | Description                                    |
 |-------------|---------------------------- |------------------------------------------------|
-| `shape`     | `str`                       | `"circle"`, `"box"`, or `"diamond"`            |
+| `shape`     | `str \| None`               | `"circle"`, `"box"`, `"diamond"`, or `None` (transparent wrapper) |
 | `label`     | `str`                       | Field name shown as text inside the shape       |
 | `edges`     | `list[str \| EdgeSpec]`     | Fields that are connections to other nodes       |
 | `data`      | `list[str]`                 | Extra tracked fields (not rendered as edges)     |
@@ -141,7 +149,7 @@ class BPInternal:
 Run any example (videos are written to `media/`):
 
 ```bash
-python examples/rbtree.py    # → media/rbtree_insert.mp4
-python examples/bst.py       # → media/bst_search_4.mp4, media/bst_insert_9.mp4
-python examples/bptree.py    # → media/bptree_insert.mp4, media/bptree_search.mp4
+uv run python examples/rbtree.py    # → media/rbtree_insert.mp4
+uv run python examples/bst.py       # → media/bst_search_4.mp4, media/bst_insert_9.mp4
+uv run python examples/bptree.py    # → media/bptree_insert.mp4, media/bptree_search.mp4
 ```

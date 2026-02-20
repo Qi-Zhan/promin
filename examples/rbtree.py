@@ -317,7 +317,6 @@ def test_rbtree():
     remaining = sorted(set(keys) - {18, 11, 3})
     assert _rb_inorder(t) == remaining
     assert _rb_valid(t)
-    print("RB tree tests ok")
 
 
 if __name__ == "__main__":
@@ -340,4 +339,3 @@ if __name__ == "__main__":
         path="media/rbtree_insert.mp4",
         config=pm.RenderConfig(background_color="#F5F0EB"),
     )
-    print("Rendered media/rbtree_insert.mp4")

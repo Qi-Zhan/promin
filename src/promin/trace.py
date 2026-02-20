@@ -488,21 +488,20 @@ class StateMachine:
             out = render_states(
                 self.states, path, fps=fps, title=title, config=config
             )
-            print(f"  ✓ Rendered {len(self.states)} states → {out}")
+            logger.info("Rendered %d states -> %s", len(self.states), out)
             return
 
         # Fallback: text visualization
         bar = "═" * 60
-        print(f"\n{bar}")
-        print(f"  StateMachine: {len(self.states)} states")
+        logger.info("\n%s", bar)
+        logger.info("StateMachine: %d states", len(self.states))
         logger.info("StateMachine.render: text mode states=%d", len(self.states))
-        print(f"{bar}\n")
+        logger.info("%s\n", bar)
 
         for i, state in enumerate(self.states):
             loc_str = f"@ {state.current_loc}" if state.current_loc else "(initial)"
-            print(f"  S{i}  {loc_str}")
-            print(render_tree_text(state.snapshot, indent=6))
-            print()
+            logger.info("S%d  %s", i, loc_str)
+            logger.info("\n%s", render_tree_text(state.snapshot, indent=6))
 
     def __repr__(self) -> str:
         return f"StateMachine({len(self.states)} states)"
