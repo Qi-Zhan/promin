@@ -64,7 +64,7 @@ _registered_classes: dict[type, _ClassInfo] = {}
 
 
 def register_class(
-    shape: str = "circle",
+    shape: Optional[str] = "circle",
     label: str = "",
     edges: list[str | EdgeSpec] | None = None,
     data: list[str] | None = None,

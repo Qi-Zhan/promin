@@ -89,7 +89,7 @@ class NodeView:
         Example: ``{"red": "#CC0000", "black": "#1A1A1A"}``.
     """
 
-    shape: str = "circle"
+    shape: Optional[str] = "circle"
     label: str = ""
     edges: list[EdgeSpec] = field(default_factory=list)
     data: list[str] = field(default_factory=list)

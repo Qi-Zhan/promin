@@ -116,6 +116,40 @@ EDGE_STROKE = 1.8
 
 
 # ---------------------------------------------------------------------------
+# _NodeRenderInfo — unified visual element descriptor
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _NodeRenderInfo:
+    """Unified render info for any visual element.
+
+    Both leaf nodes (a circle with text "7") and container borders (a box
+    around a subtree) are described by the same structure.  The renderer
+    creates and diffs mobjects from these uniformly.
+
+    Attributes
+    ----------
+    width, height : float | None
+        When ``None`` the default size for the shape is used (leaf node).
+        When set, the shape is explicitly sized (container border).
+    type_label : str
+        Corner label for containers (e.g. "RedBlackTree").
+    """
+
+    node_id: int
+    pos: np.ndarray
+    shape: str
+    fill_color: Optional[str] = None
+    focused: bool = False
+    text: str = ""
+    width: Optional[float] = None
+    height: Optional[float] = None
+    type_label: str = ""
+    z_index: int = 0
+
+
+# ---------------------------------------------------------------------------
 # Snapshot helpers — read _view metadata
 # ---------------------------------------------------------------------------
 
@@ -195,6 +229,43 @@ def _format_label_value(val: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Transparent wrapper resolution
+# ---------------------------------------------------------------------------
+
+
+def _resolve_snapshot(snapshot: Any) -> Any:
+    """Unwrap transparent wrapper nodes (``shape=None``) to their content subtree.
+
+    A registered class with ``shape=None`` acts as a transparent container
+    whose ``label`` field is itself a registered class.  This function
+    recursively follows the label field until it finds a concrete node
+    (one with a real shape) or ``None``.
+    """
+    if not isinstance(snapshot, dict) or "_type" not in snapshot:
+        return snapshot
+    view = _get_view(snapshot)
+    if view["shape"] is not None:
+        return snapshot
+    label_field = view["label"]
+    if label_field and label_field in snapshot:
+        inner = snapshot[label_field]
+        return _resolve_snapshot(inner)
+    return None
+
+
+def _is_container_snapshot(snapshot: dict) -> bool:
+    """Check if a snapshot is a container — has a shape and label is a registered subtree."""
+    view = _get_view(snapshot)
+    if view["shape"] is None:
+        return False  # transparent wrapper, not a container
+    label_field = view["label"]
+    if not label_field or label_field not in snapshot:
+        return False
+    inner = snapshot[label_field]
+    return isinstance(inner, dict) and "_type" in inner
+
+
+# ---------------------------------------------------------------------------
 # Text rendering (debug / fallback)
 # ---------------------------------------------------------------------------
 
@@ -211,9 +282,26 @@ def render_tree_text(snapshot: Any, indent: int = 0, prefix: str = "") -> str:
     if not isinstance(snapshot, dict) or "_type" not in snapshot:
         return f"{pad}{prefix}{snapshot!r}"
 
+    view = _get_view(snapshot)
+
+    # Transparent wrapper — render inner content directly
+    if view["shape"] is None:
+        label_field = view["label"]
+        if label_field and label_field in snapshot:
+            return render_tree_text(snapshot[label_field], indent, prefix)
+        return f"{pad}{prefix}∅"
+
+    # Container node — show border and render inner subtree
+    if _is_container_snapshot(snapshot):
+        type_name = snapshot.get("_type", "?")
+        marker = "  ◀━━ CURRENT" if snapshot.get("_focused") else ""
+        lines = [f"{pad}{prefix}[{view['shape']}] {type_name}{marker}"]
+        label_field = view["label"]
+        lines.append(render_tree_text(snapshot[label_field], indent + 4))
+        return "\n".join(lines)
+
     label = _get_label(snapshot)
     marker = "  ◀━━ CURRENT" if snapshot.get("_focused") else ""
-    view = _get_view(snapshot)
     lines = [f"{pad}{prefix}[{view['shape']}]({label}){marker}"]
 
     for f in view["edges"]:
@@ -244,7 +332,13 @@ def render_tree_text(snapshot: Any, indent: int = 0, prefix: str = "") -> str:
 
 
 class LayoutNode:
-    """An intermediate node carrying position info during layout."""
+    """Intermediate layout element — a container with content.
+
+    Every non-primitive rendered element is a LayoutNode.  Content is either
+    text (for leaf nodes like ``RBNode``) or a nested subtree (for containers
+    like ``RedBlackTree``).  Structural connections (edges/arrows) are stored
+    in *children*; content nesting is stored in *content_root*.
+    """
 
     __slots__ = (
         "node_id",
@@ -259,6 +353,9 @@ class LayoutNode:
         "children",
         "child_fields",
         "snapshot",
+        "content_type",
+        "content_root",
+        "type_label",
     )
 
     def __init__(self, snapshot: dict):
@@ -271,6 +368,13 @@ class LayoutNode:
         self.shape: str = view["shape"]
         self.label: str = _get_label(snapshot)
         self.fill_color: Optional[str] = _get_node_color(snapshot)
+
+        # Content model: "text" (leaf) or "subtree" (container).
+        # For leaf nodes, label holds the display text.
+        # For containers, content_root holds the inner layout tree.
+        self.content_type: str = "text"
+        self.content_root: Optional[LayoutNode] = None
+        self.type_label: str = ""
 
         # Collect child sub-trees from edge fields only
         self.child_fields: list[str] = []
@@ -291,9 +395,13 @@ class LayoutNode:
                     else:
                         self.children.append(None)
             elif isinstance(child, dict) and "_type" in child:
+                resolved = _resolve_snapshot(child)
                 self.child_fields.append(field_name)
                 self.edge_styles.append(edge_spec)
-                self.children.append(LayoutNode(child))
+                if resolved is not None and isinstance(resolved, dict) and "_type" in resolved:
+                    self.children.append(LayoutNode(resolved))
+                else:
+                    self.children.append(None)
             else:
                 self.child_fields.append(field_name)
                 self.edge_styles.append(edge_spec)
@@ -301,9 +409,41 @@ class LayoutNode:
 
 
 def layout_tree(snapshot: Any) -> Optional[LayoutNode]:
-    """Build a LayoutNode tree from a snapshot and assign coordinates."""
+    """Build a LayoutNode tree from a snapshot and assign coordinates.
+
+    Transparent wrapper nodes (``shape=None``) are automatically unwrapped.
+    Container nodes (label field is a registered subtree) produce a
+    LayoutNode with ``content_type="subtree"`` that wraps the inner tree.
+    """
+    snapshot = _resolve_snapshot(snapshot)
     if snapshot is None or not isinstance(snapshot, dict) or "_type" not in snapshot:
         return None
+
+    # Container: layout inner subtree and wrap in a container LayoutNode.
+    if _is_container_snapshot(snapshot):
+        view = _get_view(snapshot)
+        inner = snapshot[view["label"]]
+        inner_root = layout_tree(inner)  # recursive
+        if inner_root is None:
+            return None
+        # Create container LayoutNode wrapping the inner tree
+        container = LayoutNode.__new__(LayoutNode)
+        container.snapshot = snapshot
+        container.node_id = snapshot.get("_id")
+        container.type_name = snapshot.get("_type", "")
+        container.shape = view["shape"]
+        container.fill_color = _get_node_color(snapshot)
+        container.focused = snapshot.get("_focused", False)
+        container.content_type = "subtree"
+        container.content_root = inner_root
+        container.label = ""
+        container.type_label = container.type_name
+        container.children = []
+        container.child_fields = []
+        container.edge_styles = []
+        container.x = 0.0
+        container.y = 0.0
+        return container
 
     root = LayoutNode(snapshot)
     _assign_positions(root, depth=0)
@@ -413,16 +553,51 @@ def _flatten_nodes(node: Optional[LayoutNode]) -> list[LayoutNode]:
     return result
 
 
-def _collect_node_info(
+def _collect_render_info(
     root: LayoutNode,
     origin: np.ndarray,
-) -> dict[int, tuple[str, np.ndarray, bool, str, Optional[str]]]:
-    """Collect ``{node_id: (label, position, focused, shape, fill_color)}`` from layout."""
-    info: dict[int, tuple[str, np.ndarray, bool, str, Optional[str]]] = {}
+) -> dict[int, _NodeRenderInfo]:
+    """Collect ``{node_id: _NodeRenderInfo}`` from the layout tree.
+
+    Both leaf nodes and container borders are emitted into the same dict,
+    enabling unified diff-based animation.
+    """
+    info: dict[int, _NodeRenderInfo] = {}
 
     def walk(n: LayoutNode) -> None:
         if n.node_id is not None:
-            info[n.node_id] = (n.label, _node_pos(n, origin), n.focused, n.shape, n.fill_color)
+            if n.content_type == "subtree" and n.content_root is not None:
+                # Container: emit a border element sized to its content
+                x_min, x_max, y_min, y_max = _compute_bounding_box(
+                    n.content_root, origin
+                )
+                pad = CONTAINER_PADDING
+                info[n.node_id] = _NodeRenderInfo(
+                    node_id=n.node_id,
+                    pos=np.array(
+                        [(x_min + x_max) / 2, (y_min + y_max) / 2, 0.0]
+                    ),
+                    shape=n.shape,
+                    fill_color=n.fill_color,
+                    focused=n.focused,
+                    width=max(x_max - x_min + pad * 2, 1.2),
+                    height=max(y_max - y_min + pad * 2, 0.9),
+                    type_label=n.type_label,
+                    z_index=-2,
+                )
+                # Recurse into content subtree
+                walk(n.content_root)
+            else:
+                # Leaf node: emit with text content
+                info[n.node_id] = _NodeRenderInfo(
+                    node_id=n.node_id,
+                    pos=_node_pos(n, origin),
+                    shape=n.shape,
+                    fill_color=n.fill_color,
+                    focused=n.focused,
+                    text=n.label,
+                )
+        # Walk edge children
         for c in n.children:
             if c is not None:
                 walk(c)
@@ -438,6 +613,9 @@ def _collect_layout_edges(
     edges: dict[tuple[int, int], str] = {}
 
     def walk(n: LayoutNode) -> None:
+        # Walk into subtree content
+        if n.content_type == "subtree" and n.content_root is not None:
+            walk(n.content_root)
         for c, spec in zip(n.children, n.edge_styles):
             if c is not None and n.node_id is not None and c.node_id is not None:
                 edges[(n.node_id, c.node_id)] = spec.get("style", "solid")
@@ -465,53 +643,68 @@ def _node_radius(shape: str) -> float:
     return NODE_RADIUS
 
 
-def _make_node_mob(
-    label: str,
-    pos: np.ndarray,
-    focused: bool = False,
-    shape: str = "circle",
-    fill_color: Optional[str] = None,
-) -> VGroup:
-    """Create a shape + label for a node.
+CONTAINER_PADDING = 0.55
+CONTAINER_STROKE = 1.8
+CONTAINER_FILL_OPACITY = 0.06
+CONTAINER_LABEL_SIZE = 16
 
-    Parameters
-    ----------
-    fill_color : str | None
-        If given, a hex color string (e.g. ``"#CC0000"``) used as the
-        node fill.  Text color is automatically chosen for contrast.
+
+def _compute_bounding_box(
+    root: LayoutNode, origin: np.ndarray
+) -> tuple[float, float, float, float]:
+    """Compute (x_min, x_max, y_min, y_max) from all nodes in a layout tree."""
+    all_nodes = _flatten_nodes(root)
+    positions = [_node_pos(n, origin) for n in all_nodes]
+    xs = [p[0] for p in positions]
+    ys = [p[1] for p in positions]
+    return min(xs), max(xs), min(ys), max(ys)
+
+
+def _make_node_mob(info: _NodeRenderInfo) -> VGroup:
+    """Create a visual element from render info.
+
+    Both leaf nodes (shape + text label) and container borders (shape
+    sized to content bounding box) flow through the same code path.
+    When ``info.width``/``info.height`` are set, the shape is explicitly
+    sized (container); otherwise default sizes are used (leaf).
     """
-    # Determine colors
-    if fill_color:
-        fill = ManimColor(fill_color)
-        stroke_c = ManimColor(fill_color)
-        opacity = 0.85
-        stroke_w = FOCUS_STROKE if focused else 2.5
-        txt_color = _contrast_text_color(fill_color)
-        if focused:
+    has_explicit_size = info.width is not None
+
+    # --- determine colors ---
+    if info.fill_color:
+        fill = ManimColor(info.fill_color)
+        stroke_c = ManimColor(info.fill_color)
+        if has_explicit_size:
+            opacity = CONTAINER_FILL_OPACITY
+            stroke_w = CONTAINER_STROKE
+        else:
+            opacity = 0.85
+            stroke_w = FOCUS_STROKE if info.focused else 2.5
+        txt_color = _contrast_text_color(info.fill_color)
+        if info.focused and not has_explicit_size:
             stroke_c = FOCUS_COLOR
             stroke_w = FOCUS_STROKE + 1.0
-    elif focused:
+    elif info.focused:
         fill, stroke_c = FOCUS_COLOR, FOCUS_COLOR
         opacity = FOCUS_FILL_OPACITY
         stroke_w = FOCUS_STROKE
         txt_color = WHITE
     else:
-        fill, stroke_c = NORMAL_FILL, NORMAL_FILL
-        opacity = NORMAL_FILL_OPACITY
-        stroke_w = 2.0
+        if has_explicit_size:
+            fill, stroke_c = GREY_B, GREY_B
+            opacity = CONTAINER_FILL_OPACITY
+            stroke_w = CONTAINER_STROKE
+        else:
+            fill, stroke_c = NORMAL_FILL, NORMAL_FILL
+            opacity = NORMAL_FILL_OPACITY
+            stroke_w = 2.0
         txt_color = WHITE
 
-    if shape == "box":
-        body = Rectangle(
-            width=BOX_WIDTH,
-            height=BOX_HEIGHT,
-            color=stroke_c,
-            fill_color=fill,
-            fill_opacity=opacity,
-            stroke_width=stroke_w,
-        )
-    elif shape == "diamond":
-        r = NODE_RADIUS * 1.2
+    # --- build shape (same branches handle both leaf and container sizes) ---
+    pos = info.pos
+
+    if info.shape == "diamond":
+        r = max(info.width, info.height) / 2 if has_explicit_size else NODE_RADIUS * 1.2
         body = Polygon(
             pos + np.array([0, r, 0]),
             pos + np.array([r, 0, 0]),
@@ -522,19 +715,54 @@ def _make_node_mob(
             fill_opacity=opacity,
             stroke_width=stroke_w,
         )
-        txt = Text(str(label), font="Menlo", font_size=18, color=txt_color)
-        return VGroup(body, txt).move_to(pos)
-    else:  # "circle" and fallback
+    elif info.shape == "circle":
+        radius = max(info.width, info.height) / 2 if has_explicit_size else NODE_RADIUS
         body = Circle(
-            radius=NODE_RADIUS,
+            radius=radius,
+            color=stroke_c,
+            fill_color=fill,
+            fill_opacity=opacity,
+            stroke_width=stroke_w,
+        )
+    else:  # "box" and fallback
+        body = Rectangle(
+            width=info.width or BOX_WIDTH,
+            height=info.height or BOX_HEIGHT,
             color=stroke_c,
             fill_color=fill,
             fill_opacity=opacity,
             stroke_width=stroke_w,
         )
 
-    txt = Text(str(label), font="Menlo", font_size=20, color=txt_color)
-    return VGroup(body, txt).move_to(pos)
+    body.move_to(pos)
+    body.set_z_index(info.z_index)
+
+    parts: list[VMobject] = [body]
+
+    # --- text content (leaf nodes) ---
+    if info.text:
+        font_size = 18 if info.shape == "diamond" else 20
+        txt = Text(str(info.text), font="Menlo", font_size=font_size, color=txt_color)
+        txt.move_to(pos)
+        parts.append(txt)
+
+    # --- type label at corner (containers) ---
+    if info.type_label:
+        lbl_color = _contrast_text_color(info.fill_color) if info.fill_color else GREY_A
+        lbl = Text(
+            info.type_label,
+            font="Menlo",
+            font_size=CONTAINER_LABEL_SIZE,
+            color=lbl_color,
+        )
+        lbl.move_to(
+            body.get_corner(UP + np.array([-1, 0, 0]))
+            + np.array([lbl.width / 2 + 0.12, -0.18, 0])
+        )
+        lbl.set_z_index(info.z_index)
+        parts.append(lbl)
+
+    return VGroup(*parts)
 
 
 def _make_edge(
@@ -579,6 +807,9 @@ class _ManimStateRenderer:
     """
     Diff-based renderer: maintains persistent mobjects keyed by node ``_id``
     and only animates the changes between consecutive states.
+
+    Every visual element — both leaf nodes and container borders — is
+    tracked in the same ``_node_mobs`` dict, enabling uniform diffing.
     """
 
     def __init__(
@@ -600,13 +831,13 @@ class _ManimStateRenderer:
         """Transition to a new state with minimal, diff-based animations."""
         snapshots = snapshot if isinstance(snapshot, list) else [snapshot]
 
-        # Layout all captured trees and merge node/edge info
-        new_info: dict[int, tuple[str, np.ndarray, bool, str]] = {}
+        # Layout and collect all render info uniformly
+        new_info: dict[int, _NodeRenderInfo] = {}
         new_edges: dict[tuple[int, int], str] = {}
         for snap in snapshots:
             lr = layout_tree(snap)
             if lr is not None:
-                new_info.update(_collect_node_info(lr, self.origin))
+                new_info.update(_collect_render_info(lr, self.origin))
                 new_edges.update(_collect_layout_edges(lr))
 
         anims: list = []
@@ -638,36 +869,36 @@ class _ManimStateRenderer:
         for eid in old_eids - new_eids:
             anims.append(FadeOut(self._edge_mobs.pop(eid)))
 
-        # --- Transform persistent nodes (position + focus style + shape) ---
+        # --- Transform persistent nodes ---
         for nid in old_nids & new_nids:
-            lbl, pos, focused, shp, fc = new_info[nid]
-            target = _make_node_mob(lbl, pos, focused, shp, fill_color=fc)
+            target = _make_node_mob(new_info[nid])
             anims.append(ReplacementTransform(self._node_mobs[nid], target))
             self._node_mobs[nid] = target
 
-        # --- Transform persistent edges (endpoints may have shifted) ---
+        # --- Transform persistent edges ---
         for eid in old_eids & new_eids:
             pid, cid = eid
             style = new_edges[eid]
-            _, p1, _, s1, _ = new_info[pid]
-            _, p2, _, s2, _ = new_info[cid]
-            new_edge = _make_edge(p1, p2, style, s1, s2)
+            p_info, c_info = new_info[pid], new_info[cid]
+            new_edge = _make_edge(
+                p_info.pos, c_info.pos, style, p_info.shape, c_info.shape
+            )
             new_edge.set_z_index(-1)
             anims.append(ReplacementTransform(self._edge_mobs[eid], new_edge))
             self._edge_mobs[eid] = new_edge
 
         # --- FadeIn new nodes / edges ---
         for nid in new_nids - old_nids:
-            lbl, pos, focused, shp, fc = new_info[nid]
-            mob = _make_node_mob(lbl, pos, focused, shp, fill_color=fc)
+            mob = _make_node_mob(new_info[nid])
             self._node_mobs[nid] = mob
             anims.append(FadeIn(mob))
         for eid in new_eids - old_eids:
             pid, cid = eid
             style = new_edges[eid]
-            _, p1, _, s1, _ = new_info[pid]
-            _, p2, _, s2, _ = new_info[cid]
-            edge = _make_edge(p1, p2, style, s1, s2)
+            p_info, c_info = new_info[pid], new_info[cid]
+            edge = _make_edge(
+                p_info.pos, c_info.pos, style, p_info.shape, c_info.shape
+            )
             edge.set_z_index(-1)
             self._edge_mobs[eid] = edge
             anims.append(FadeIn(edge))

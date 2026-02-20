@@ -51,6 +51,10 @@ def _make_nil() -> RBNode:
 SENTINEL = _make_nil()
 
 
+@pm.register_class(
+    shape="box",
+    label="root",
+)
 class RedBlackTree:
 
     def __init__(self):
@@ -324,10 +328,9 @@ if __name__ == "__main__":
     keys = [7, 3, 18, 10, 22, 8]
 
     sm = pm.StateMachine()
-    # We need to capture the non-sentinel nodes
-    # Insert the first key to get a root
+    # Capture the whole tree (shape=None wrapper auto-unwraps to root)
     t.insert(keys[0])
-    sm.capture(t.root)
+    sm.capture(t)
 
     with pm.record("RBTree insert", sm):
         for k in keys[1:]:
