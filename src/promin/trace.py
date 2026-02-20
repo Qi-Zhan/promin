@@ -3,7 +3,7 @@ promin.trace — Automatic state tracking via sys.settrace.
 
 Core pipeline::
 
-    1. register_class(fields=[...])    — declare which fields to snapshot
+    1. register_type(...)              — declare which types to snapshot
     2. StateMachine.init_state(root)   — capture initial state
     3. record(name, sm)                — trace execution, capture states
     4. sm.render()                     — visualize the state sequence
@@ -12,6 +12,7 @@ Core pipeline::
 from __future__ import annotations
 
 import copy
+import json
 import logging
 import dis
 import os
@@ -19,7 +20,15 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-from .view import NodeView, EdgeSpec, normalize_edges, View, RegisteredClassView
+from .view import (
+    TypeViewSpec,
+    EdgeSpec,
+    LayoutSpec,
+    normalize_edges,
+    normalize_layout_spec,
+    View,
+    RegisteredClassView,
+)
 from .render import render_tree_text, render_states, RenderConfig
 
 logger = logging.getLogger(__name__)
@@ -43,13 +52,17 @@ class SourceLoc:
 
 
 @dataclass
-class _ClassInfo:
-    """Internal metadata for a registered class."""
+class _TypeInfo:
+    """Internal metadata for a registered type."""
 
     type_name: str
-    view: NodeView
-    cls: type
+    view: TypeViewSpec
+    typ: type
     skip_if: Optional[Callable] = None
+    label_resolver: Optional[Callable[[Any], Any]] = None
+    children_resolver: Optional[Callable[[Any], dict[str, Any]]] = None
+    data_resolver: Optional[Callable[[Any], dict[str, Any]]] = None
+    focusable: bool = True
 
     @property
     def fields(self) -> list[str]:
@@ -60,10 +73,51 @@ class _ClassInfo:
 # Registry — which classes are tracked and how to snapshot them
 # ---------------------------------------------------------------------------
 
-_registered_classes: dict[type, _ClassInfo] = {}
+_registered_types: dict[type, _TypeInfo] = {}
 
 
-def register_class(
+def override_type_view_spec(value_type: type, view_spec: TypeViewSpec) -> bool:
+    """Override the registered TypeViewSpec for an existing type.
+
+    Returns True when the type exists in the snapshot registry, False otherwise.
+    """
+    info = _registered_types.get(value_type)
+    if info is None:
+        return False
+    if view_spec.layout is None:
+        raise TypeError(
+            "TypeViewSpec.layout is required. "
+            "Example: layout={'name': 'row', 'params': {}}"
+        )
+    info.view = view_spec
+    return True
+
+
+def _validate_layout(layout: Any) -> LayoutSpec:
+    if isinstance(layout, str):
+        raise TypeError(
+            "layout must be a dict {'name': <str>, 'params': <dict>}, "
+            "not a bare string."
+        )
+    spec = normalize_layout_spec(layout)
+    if not spec.name:
+        raise TypeError(
+            "layout.name must be a non-empty string. "
+            "Example: layout={'name': 'tree', 'params': {}}"
+        )
+    if not isinstance(spec.params, dict):
+        raise TypeError("layout.params must be a dict")
+    try:
+        json.dumps(spec.params)
+    except TypeError as exc:
+        raise TypeError("layout.params must be JSON-serializable") from exc
+    return spec
+
+
+def register_type(
+    cls: type | None = None,
+    *,
+    layout: LayoutSpec | dict[str, Any],
     shape: Optional[str] = "circle",
     label: str = "",
     edges: list[str | EdgeSpec] | None = None,
@@ -72,13 +126,20 @@ def register_class(
     color_field: str = "",
     color_map: dict[str, str] | None = None,
     skip_if: Optional[Callable] = None,
+    label_resolver: Optional[Callable[[Any], Any]] = None,
+    children_resolver: Optional[Callable[[Any], dict[str, Any]]] = None,
+    data_resolver: Optional[Callable[[Any], dict[str, Any]]] = None,
+    content_field: str | None = None,
+    focusable: bool = True,
+    register_view: bool = True,
 ):
     """
-    Decorator: register a class for automatic state tracking and visualization.
+    Register a type for automatic state tracking and visualization.
 
     Example::
 
-        @pm.register_class(
+        @pm.register_type(
+            layout={"name": "tree", "params": {}},
             shape="circle",
             label="key",
             edges=["left", "right"],
@@ -109,30 +170,110 @@ def register_class(
         nodes in Red-Black trees, etc.).
     """
 
-    def decorator(cls):
-        name = type_name or cls.__name__
-        view = NodeView(
+    def _register(target_cls: type):
+        name = type_name or target_cls.__name__
+        normalized_layout = _validate_layout(layout)
+        if content_field is not None and (
+            not isinstance(content_field, str) or not content_field
+        ):
+            raise TypeError("content_field must be a non-empty string when provided")
+        view = TypeViewSpec(
             shape=shape,
             label=label,
             edges=normalize_edges(edges or []),
             data=data or [],
             color_field=color_field,
             color_map=color_map or {},
+            layout=normalized_layout,
+            content_field=content_field or "",
         )
-        _registered_classes[cls] = _ClassInfo(type_name=name, view=view, cls=cls, skip_if=skip_if)
+        if view.content_field and view.content_field not in view.fields:
+            raise TypeError(
+                "content_field must reference a tracked field "
+                "(label, edge, or data field)."
+            )
+        _registered_types[target_cls] = _TypeInfo(
+            type_name=name,
+            view=view,
+            typ=target_cls,
+            skip_if=skip_if,
+            label_resolver=label_resolver,
+            children_resolver=children_resolver,
+            data_resolver=data_resolver,
+            focusable=focusable,
+        )
         logger.info(
-            "register_class: %s shape=%s label=%s edges=%d data=%d",
+            "register_type: %s shape=%s label=%s edges=%d data=%d",
             name,
             shape,
             label,
             len(view.edges),
             len(view.data),
         )
-        # Register in the View dispatch system — carries the full NodeView spec
-        View.register(cls, lambda v=view: RegisteredClassView(v))
-        return cls
+        # User-defined object types participate in View dispatch as registered nodes.
+        # Built-ins can keep their dedicated View implementations by setting
+        # register_view=False.
+        if register_view:
+            View.register(target_cls, lambda v=view: RegisteredClassView(v))
+        return target_cls
+
+    if cls is not None:
+        return _register(cls)
+
+    def decorator(target_cls):
+        return _register(target_cls)
 
     return decorator
+
+
+def _register_builtin_types() -> None:
+    """Register phase-1 built-in types in the unified registry."""
+    register_type(
+        int,
+        layout={"name": "row", "params": {}},
+        shape="box",
+        label="value",
+        data=["value"],
+        type_name="int",
+        label_resolver=lambda v: v,
+        data_resolver=lambda v: {"value": v},
+        focusable=False,
+        register_view=False,
+    )
+    register_type(
+        bool,
+        layout={"name": "row", "params": {}},
+        shape="diamond",
+        label="value",
+        data=["value"],
+        type_name="bool",
+        label_resolver=lambda v: v,
+        data_resolver=lambda v: {"value": v},
+        focusable=False,
+        register_view=False,
+    )
+    register_type(
+        list,
+        layout={"name": "row", "params": {"wrap": True, "columns": 8}},
+        shape="box",
+        label="summary",
+        edges=[
+            EdgeSpec(
+                field="elements",
+                direction="right",
+                layout=LayoutSpec(name="row", params={"wrap": True, "columns": 8}),
+            )
+        ],
+        data=["summary"],
+        type_name="list",
+        label_resolver=lambda v: f"len={len(v)}",
+        children_resolver=lambda v: {"elements": list(v)},
+        data_resolver=lambda v: {"summary": f"len={len(v)}"},
+        register_view=False,
+    )
+
+
+_register_builtin_types()
 
 
 # ---------------------------------------------------------------------------
@@ -153,32 +294,35 @@ def _snapshot_values(snapshot: Any) -> Any:
     }
 
 
+def _stable_child_id(parent_oid: int, field_name: str, index: int) -> int:
+    """Stable synthetic id for container child slots."""
+    return hash((parent_oid, field_name, index))
+
+
 def _snapshot_obj_inner(
-    obj: Any, focused_id: Optional[int], seen: dict[int, dict]
+    obj: Any, focused_id: Optional[int], seen: dict[int, dict], *,
+    synthetic_id: Optional[int] = None,
 ) -> Any:
     """Recursive snapshot helper with a shared *seen* dict for dedup."""
     if obj is None:
         return None
 
-    # Handle sequences — recursively snapshot each element
-    if isinstance(obj, list):
-        return [_snapshot_obj_inner(item, focused_id, seen) for item in obj]
-    if isinstance(obj, tuple):
-        return tuple(_snapshot_obj_inner(item, focused_id, seen) for item in obj)
-    if isinstance(obj, set):
-        return [_snapshot_obj_inner(item, focused_id, seen) for item in obj]
-    if isinstance(obj, dict):
-        return {k: _snapshot_obj_inner(v, focused_id, seen) for k, v in obj.items()}
-
-    info = _registered_classes.get(type(obj))
+    info = _registered_types.get(type(obj))
     if info is None:
+        # Non-phase-1 builtins keep current fallback semantics.
+        if isinstance(obj, tuple):
+            return tuple(_snapshot_obj_inner(item, focused_id, seen) for item in obj)
+        if isinstance(obj, set):
+            return [_snapshot_obj_inner(item, focused_id, seen) for item in obj]
+        if isinstance(obj, dict):
+            return {k: _snapshot_obj_inner(v, focused_id, seen) for k, v in obj.items()}
         return copy.deepcopy(obj)
 
     # skip_if predicate — treat excluded objects as None (e.g. sentinel nodes)
     if info.skip_if is not None and info.skip_if(obj):
         return None
 
-    oid = id(obj)
+    oid = synthetic_id if synthetic_id is not None else id(obj)
     if oid in seen:
         return seen[oid]
 
@@ -189,7 +333,35 @@ def _snapshot_obj_inner(
         "_view": info.view.to_dict(),
     }
     seen[oid] = node  # register before recursion (handles cycles / shared refs)
+    if info.label_resolver is not None:
+        label_field = info.view.label
+        if label_field:
+            node[label_field] = copy.deepcopy(info.label_resolver(obj))
+
+    if info.children_resolver is not None:
+        for field_name, child_val in info.children_resolver(obj).items():
+            if isinstance(child_val, list):
+                children = []
+                for i, item in enumerate(child_val):
+                    children.append(
+                        _snapshot_obj_inner(
+                            item,
+                            focused_id,
+                            seen,
+                            synthetic_id=_stable_child_id(oid, field_name, i),
+                        )
+                    )
+                node[field_name] = children
+            else:
+                node[field_name] = _snapshot_obj_inner(child_val, focused_id, seen)
+
+    if info.data_resolver is not None:
+        for field_name, data_val in info.data_resolver(obj).items():
+            node[field_name] = copy.deepcopy(data_val)
+
     for f in info.fields:
+        if f in node:
+            continue
         node[f] = _snapshot_obj_inner(getattr(obj, f, None), focused_id, seen)
     return node
 
@@ -522,6 +694,11 @@ _LOAD_OPS = frozenset(
 )
 
 
+def _is_focusable_registered_value(val: Any) -> bool:
+    info = _registered_types.get(type(val))
+    return info is not None and info.focusable
+
+
 def _line_var_names(code, lineno: int) -> list[str]:
     """Return variable names referenced by bytecode instructions on *lineno*."""
     names: list[str] = []
@@ -600,7 +777,7 @@ class _RecordContext:
         focused_obj = None
         for name in names:
             val = frame.f_locals.get(name)
-            if val is not None and type(val) in _registered_classes:
+            if val is not None and _is_focusable_registered_value(val):
                 focused_obj = val
                 break
 
@@ -636,7 +813,7 @@ class _RecordContext:
         focused_obj = None
         if self._trace_current:
             for val in frame.f_locals.values():
-                if val is not None and type(val) in _registered_classes:
+                if val is not None and _is_focusable_registered_value(val):
                     focused_obj = val
                     break
 

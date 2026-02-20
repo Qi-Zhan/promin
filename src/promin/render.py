@@ -14,16 +14,18 @@ assumptions about field names (like ``"key"`` or ``"left"``).
 from __future__ import annotations
 
 import logging
+import json
 import subprocess
 import sys
 import tempfile
 import textwrap
+import inspect
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 
-from .view import View
+from .view import LayoutSpec, normalize_layout_spec, View
 
 from manim import (
     BLUE_C,
@@ -94,6 +96,37 @@ class RenderConfig:
     quality: str = "l"         # l | m | h | k
 
 
+@dataclass
+class LayoutContext:
+    """Context passed to layout plugins."""
+
+    parent_id: int | None
+    children: list[dict[str, Any]]
+    params: dict[str, Any]
+    gap_x: float
+    gap_y: float
+
+
+@dataclass
+class LayoutResult:
+    """Relative child coordinates keyed by child node id."""
+
+    positions: dict[int, tuple[float, float]] = dc_field(default_factory=dict)
+
+
+LayoutFn = Callable[[LayoutContext], LayoutResult]
+_layout_registry: dict[str, LayoutFn] = {}
+_builtin_layout_names: set[str] = set()
+
+
+def register_layout(name: str, fn: LayoutFn) -> None:
+    if not isinstance(name, str) or not name:
+        raise TypeError("layout name must be a non-empty string")
+    if not callable(fn):
+        raise TypeError("layout function must be callable")
+    _layout_registry[name] = fn
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -113,6 +146,150 @@ NORMAL_FILL_OPACITY = 0.22
 FOCUS_FILL_OPACITY = 0.45
 EDGE_COLOR = GREY_B
 EDGE_STROKE = 1.8
+
+
+def _layout_row(ctx: LayoutContext) -> LayoutResult:
+    items = [c for c in ctx.children if c.get("node_id") is not None]
+    n = len(items)
+    if n == 0:
+        return LayoutResult({})
+    wrap = bool(ctx.params.get("wrap", False))
+    columns = ctx.params.get("columns")
+    if columns is None:
+        columns = n
+    if not isinstance(columns, int) or columns <= 0:
+        raise ValueError("row layout requires params.columns to be a positive int")
+    cols = min(columns, n) if wrap else n
+    out: dict[int, tuple[float, float]] = {}
+    rows = (n + cols - 1) // cols
+    for idx, child in enumerate(items):
+        row = idx // cols
+        col = idx % cols
+        row_count = cols if row < rows - 1 else (n - row * cols)
+        x = (col - (row_count - 1) / 2.0) * ctx.gap_x
+        y = -(row + 1) * ctx.gap_y
+        out[child["node_id"]] = (x, y)
+    return LayoutResult(out)
+
+
+def _layout_column(ctx: LayoutContext) -> LayoutResult:
+    items = [c for c in ctx.children if c.get("node_id") is not None]
+    out: dict[int, tuple[float, float]] = {}
+    for idx, child in enumerate(items):
+        out[child["node_id"]] = (0.0, -(idx + 1) * ctx.gap_y)
+    return LayoutResult(out)
+
+
+def _layout_grid(ctx: LayoutContext) -> LayoutResult:
+    items = [c for c in ctx.children if c.get("node_id") is not None]
+    n = len(items)
+    if n == 0:
+        return LayoutResult({})
+    columns = ctx.params.get("columns", 3)
+    if not isinstance(columns, int) or columns <= 0:
+        raise ValueError("grid layout requires params.columns to be a positive int")
+    out: dict[int, tuple[float, float]] = {}
+    rows = (n + columns - 1) // columns
+    for idx, child in enumerate(items):
+        row = idx // columns
+        col = idx % columns
+        row_count = columns if row < rows - 1 else (n - row * columns)
+        x = (col - (row_count - 1) / 2.0) * ctx.gap_x
+        y = -(row + 1) * ctx.gap_y
+        out[child["node_id"]] = (x, y)
+    return LayoutResult(out)
+
+
+def _layout_radial(ctx: LayoutContext) -> LayoutResult:
+    items = [c for c in ctx.children if c.get("node_id") is not None]
+    n = len(items)
+    if n == 0:
+        return LayoutResult({})
+    radius = float(ctx.params.get("radius", 1.8))
+    out: dict[int, tuple[float, float]] = {}
+    for idx, child in enumerate(items):
+        theta = 2 * np.pi * idx / n
+        out[child["node_id"]] = (radius * np.cos(theta), -abs(radius * np.sin(theta)))
+    return LayoutResult(out)
+
+
+def _layout_tree(ctx: LayoutContext) -> LayoutResult:
+    items = [c for c in ctx.children if c.get("node_id") is not None]
+    if not items:
+        return LayoutResult({})
+
+    left: list[dict[str, Any]] = []
+    right: list[dict[str, Any]] = []
+    for child in items:
+        direction = child.get("direction", "auto")
+        if direction == "left":
+            left.append(child)
+        elif direction == "right":
+            right.append(child)
+        else:
+            left.append(child)
+
+    if all(c.get("direction", "auto") in ("auto", "down", "up") for c in items):
+        mid = len(items) // 2
+        left = items[:mid]
+        right = items[mid:]
+
+    out: dict[int, tuple[float, float]] = {}
+    for i, child in enumerate(reversed(left), start=1):
+        out[child["node_id"]] = (-i * ctx.gap_x, -ctx.gap_y)
+    for i, child in enumerate(right, start=1):
+        out[child["node_id"]] = (i * ctx.gap_x, -ctx.gap_y)
+    return LayoutResult(out)
+
+
+def _require_layout(name: str) -> LayoutFn:
+    fn = _layout_registry.get(name)
+    if fn is None:
+        available = ", ".join(sorted(_layout_registry.keys()))
+        raise ValueError(f"Unknown layout '{name}'. Available layouts: {available}")
+    return fn
+
+
+def _register_builtin_layouts() -> None:
+    register_layout("tree", _layout_tree)
+    register_layout("row", _layout_row)
+    register_layout("column", _layout_column)
+    register_layout("grid", _layout_grid)
+    register_layout("radial", _layout_radial)
+    _builtin_layout_names.update({"tree", "row", "column", "grid", "radial"})
+
+
+_register_builtin_layouts()
+
+
+def _custom_layout_bootstrap_code() -> str:
+    """Generate Python code to re-register custom layouts in the render subprocess."""
+    lines: list[str] = []
+    for name, fn in _layout_registry.items():
+        if name in _builtin_layout_names:
+            continue
+
+        qualname = getattr(fn, "__qualname__", "")
+        module = getattr(fn, "__module__", "")
+        if module and module != "__main__" and "<locals>" not in qualname:
+            lines.append(f"_mod = importlib.import_module({module!r})")
+            lines.append("_fn = _mod")
+            for part in qualname.split("."):
+                lines.append(f"_fn = getattr(_fn, {part!r})")
+            lines.append(f"register_layout({name!r}, _fn)")
+            continue
+
+        try:
+            source = textwrap.dedent(inspect.getsource(fn)).rstrip()
+        except (OSError, TypeError) as exc:
+            raise RuntimeError(
+                f"Cannot serialize custom layout '{name}'. "
+                "Define it as a module-level function."
+            ) from exc
+        lines.append(source)
+        lines.append(f"register_layout({name!r}, {fn.__name__})")
+
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +342,8 @@ def _get_view(snapshot: dict) -> dict:
         "data": view.get("data", []),
         "color_field": view.get("color_field", ""),
         "color_map": view.get("color_map", {}),
+        "layout": view.get("layout"),
+        "content_field": view.get("content_field", ""),
     }
 
 
@@ -254,15 +433,17 @@ def _resolve_snapshot(snapshot: Any) -> Any:
 
 
 def _is_container_snapshot(snapshot: dict) -> bool:
-    """Check if a snapshot is a container — has a shape and label is a registered subtree."""
+    """Container is explicit via content_field, never inferred from label."""
     view = _get_view(snapshot)
     if view["shape"] is None:
         return False  # transparent wrapper, not a container
-    label_field = view["label"]
-    if not label_field or label_field not in snapshot:
+    content_field = view["content_field"]
+    if not content_field or content_field not in snapshot:
         return False
-    inner = snapshot[label_field]
-    return isinstance(inner, dict) and "_type" in inner
+    inner = snapshot[content_field]
+    if not (isinstance(inner, dict) and "_type" in inner):
+        return False
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -296,8 +477,8 @@ def render_tree_text(snapshot: Any, indent: int = 0, prefix: str = "") -> str:
         type_name = snapshot.get("_type", "?")
         marker = "  ◀━━ CURRENT" if snapshot.get("_focused") else ""
         lines = [f"{pad}{prefix}[{view['shape']}] {type_name}{marker}"]
-        label_field = view["label"]
-        lines.append(render_tree_text(snapshot[label_field], indent + 4))
+        content_field = view["content_field"]
+        lines.append(render_tree_text(snapshot[content_field], indent + 4))
         return "\n".join(lines)
 
     label = _get_label(snapshot)
@@ -356,6 +537,7 @@ class LayoutNode:
         "content_type",
         "content_root",
         "type_label",
+        "layout_spec",
     )
 
     def __init__(self, snapshot: dict):
@@ -368,6 +550,14 @@ class LayoutNode:
         self.shape: str = view["shape"]
         self.label: str = _get_label(snapshot)
         self.fill_color: Optional[str] = _get_node_color(snapshot)
+        raw_layout = view.get("layout")
+        if raw_layout is None:
+            raise ValueError(
+                f"Missing layout for node type '{self.type_name}'. "
+                "No default layout is allowed."
+            )
+        self.layout_spec: LayoutSpec = normalize_layout_spec(raw_layout)
+        _require_layout(self.layout_spec.name)
 
         # Content model: "text" (leaf) or "subtree" (container).
         # For leaf nodes, label holds the display text.
@@ -412,7 +602,7 @@ def layout_tree(snapshot: Any) -> Optional[LayoutNode]:
     """Build a LayoutNode tree from a snapshot and assign coordinates.
 
     Transparent wrapper nodes (``shape=None``) are automatically unwrapped.
-    Container nodes (label field is a registered subtree) produce a
+    Container nodes (``content_field`` is a registered subtree) produce a
     LayoutNode with ``content_type="subtree"`` that wraps the inner tree.
     """
     snapshot = _resolve_snapshot(snapshot)
@@ -422,7 +612,7 @@ def layout_tree(snapshot: Any) -> Optional[LayoutNode]:
     # Container: layout inner subtree and wrap in a container LayoutNode.
     if _is_container_snapshot(snapshot):
         view = _get_view(snapshot)
-        inner = snapshot[view["label"]]
+        inner = snapshot[view["content_field"]]
         inner_root = layout_tree(inner)  # recursive
         if inner_root is None:
             return None
@@ -441,6 +631,14 @@ def layout_tree(snapshot: Any) -> Optional[LayoutNode]:
         container.children = []
         container.child_fields = []
         container.edge_styles = []
+        raw_layout = view.get("layout")
+        if raw_layout is None:
+            raise ValueError(
+                f"Missing layout for node type '{container.type_name}'. "
+                "No default layout is allowed."
+            )
+        container.layout_spec = normalize_layout_spec(raw_layout)
+        _require_layout(container.layout_spec.name)
         container.x = 0.0
         container.y = 0.0
         return container
@@ -456,50 +654,88 @@ def layout_tree(snapshot: Any) -> Optional[LayoutNode]:
 
 
 def _assign_positions(node: LayoutNode, depth: int) -> None:
-    """DFS inorder walk — assigns x = inorder slot, y = -depth.
+    """Assign node coordinates by dispatching to explicit layout plugins."""
+    node.x = 0.0
+    node.y = -depth * V_GAP
 
-    Respects edge direction hints: ``"left"`` children are placed before
-    the parent, ``"right"`` after.  ``"auto"`` splits evenly.
-    """
-    _slot = [0.0]
+    def _layout_for_edge(n: LayoutNode, spec: dict) -> LayoutSpec:
+        raw = spec.get("layout")
+        if raw is not None:
+            return normalize_layout_spec(raw)
+        if n.layout_spec is None:
+            raise ValueError(
+                f"Node '{n.type_name}' has no layout and edge '{spec.get('field')}' "
+                "does not provide one."
+            )
+        return n.layout_spec
 
-    def walk(n: LayoutNode, d: int):
-        left_children: list[LayoutNode] = []
-        right_children: list[LayoutNode] = []
+    def walk(n: LayoutNode, gap_x: float) -> None:
+        real_pairs: list[tuple[LayoutNode, dict]] = [
+            (c, spec)
+            for c, spec in zip(n.children, n.edge_styles)
+            if c is not None
+        ]
+        if not real_pairs:
+            return
 
-        for c, spec in zip(n.children, n.edge_styles):
-            if c is None:
-                continue
-            direction = spec.get("direction", "auto")
-            if direction == "left":
-                left_children.append(c)
-            elif direction == "right":
-                right_children.append(c)
-            else:
-                # "auto" / "down" / "up" → split evenly
-                left_children.append(c)  # will be rebalanced below
+        specs = [_layout_for_edge(n, spec) for _, spec in real_pairs]
+        key_set = {(s.name, json.dumps(s.params, sort_keys=True)) for s in specs}
+        if len(key_set) != 1:
+            raise ValueError(
+                f"Node '{n.type_name}' has mixed child layouts. "
+                "Use one layout per node level."
+            )
+        layout_spec = specs[0]
+        layout_fn = _require_layout(layout_spec.name)
+        ctx = LayoutContext(
+            parent_id=n.node_id,
+            children=[
+                {
+                    "node_id": child.node_id,
+                    "field": spec.get("field"),
+                    "direction": spec.get("direction", "auto"),
+                    "index": i,
+                }
+                for i, (child, spec) in enumerate(real_pairs)
+            ],
+            params=dict(layout_spec.params),
+            gap_x=gap_x,
+            gap_y=V_GAP,
+        )
+        result = layout_fn(ctx)
+        if not isinstance(result, LayoutResult):
+            raise TypeError(
+                f"Layout '{layout_spec.name}' must return LayoutResult, "
+                f"got {type(result).__name__}"
+            )
 
-        # For "auto": split children roughly in half
-        if all(
-            spec.get("direction", "auto") in ("auto", "down", "up")
-            for spec in n.edge_styles
-        ):
-            all_real = [c for c in n.children if c is not None]
-            mid = len(all_real) // 2
-            left_children = all_real[:mid]
-            right_children = all_real[mid:]
+        missing = [c.node_id for c, _ in real_pairs if c.node_id not in result.positions]
+        if missing:
+            raise ValueError(
+                f"Layout '{layout_spec.name}' did not return coordinates for child ids: {missing}"
+            )
 
-        for c in left_children:
-            walk(c, d + 1)
+        for child, _ in real_pairs:
+            dx_dy = result.positions.get(child.node_id)
+            if (
+                not isinstance(dx_dy, tuple)
+                or len(dx_dy) != 2
+                or not isinstance(dx_dy[0], (int, float))
+                or not isinstance(dx_dy[1], (int, float))
+            ):
+                raise ValueError(
+                    f"Layout '{layout_spec.name}' returned invalid coordinate for "
+                    f"child id {child.node_id}: {dx_dy!r}"
+                )
+            dx, dy = dx_dy
+            child.x = n.x + float(dx)
+            child.y = n.y + float(dy)
+            next_gap_x = gap_x
+            if layout_spec.name == "tree":
+                next_gap_x = max(0.35, gap_x * 0.5)
+            walk(child, next_gap_x)
 
-        n.x = _slot[0]
-        n.y = -d * V_GAP
-        _slot[0] += 1
-
-        for c in right_children:
-            walk(c, d + 1)
-
-    walk(node, depth)
+    walk(node, 1.0)
 
 
 def _center_tree(root: LayoutNode) -> None:
@@ -643,6 +879,33 @@ def _node_radius(shape: str) -> float:
     return NODE_RADIUS
 
 
+def _boundary_offset(shape: str, direction_unit: np.ndarray) -> np.ndarray:
+    """Return offset from node center to boundary along *direction_unit*."""
+    dx = float(direction_unit[0])
+    dy = float(direction_unit[1])
+
+    if shape == "box":
+        hw = BOX_WIDTH / 2.0
+        hh = BOX_HEIGHT / 2.0
+        tx = float("inf") if abs(dx) < 1e-9 else hw / abs(dx)
+        ty = float("inf") if abs(dy) < 1e-9 else hh / abs(dy)
+        t = min(tx, ty)
+        return np.array([dx * t, dy * t, 0.0])
+
+    if shape == "diamond":
+        # |x| + |y| = r for a 45-degree diamond with vertical/horizontal radius r
+        r = NODE_RADIUS * 1.2
+        denom = abs(dx) + abs(dy)
+        if denom < 1e-9:
+            return np.array([0.0, 0.0, 0.0])
+        t = r / denom
+        return np.array([dx * t, dy * t, 0.0])
+
+    # circle and fallback
+    r = _node_radius(shape)
+    return np.array([dx * r, dy * r, 0.0])
+
+
 CONTAINER_PADDING = 0.55
 CONTAINER_STROKE = 1.8
 CONTAINER_FILL_OPACITY = 0.06
@@ -772,19 +1035,22 @@ def _make_edge(
     shape1: str = "circle",
     shape2: str = "circle",
 ) -> Line:
-    """Create an edge line between two node centers, shortened by node radii."""
+    """Create an edge between two node centers, anchored to shape boundaries."""
     d = p2 - p1
     d_len = float(np.linalg.norm(d))
     if d_len < 1e-6:
         return Line(p1, p2, color=EDGE_COLOR, stroke_width=0)
     dn = d / d_len
-    r1 = _node_radius(shape1)
-    r2 = _node_radius(shape2)
+    start = p1 + _boundary_offset(shape1, dn)
+    end = p2 - _boundary_offset(shape2, dn)
+
+    if style == "none":
+        return Line(start, end, color=EDGE_COLOR, stroke_width=0)
 
     # Arrow for all edges
     edge = Arrow(
-        p1 + dn * r1,
-        p2 - dn * r2,
+        start,
+        end,
         buff=0,
         stroke_width=EDGE_STROKE,
         color=EDGE_COLOR,
@@ -1044,6 +1310,7 @@ def _generate_scene_source(
             }
         )
     frames_json = json.dumps(frames, default=str)
+    layout_bootstrap = _custom_layout_bootstrap_code()
 
     # Resolve adaptive colors
     bg = cfg.background_color or "#000000"
@@ -1059,14 +1326,26 @@ def _generate_scene_source(
     if cfg.background_color:
         bg_line = f'self.camera.background_color = "{cfg.background_color}"'
 
-    return textwrap.dedent(
+    header = [
+        "from __future__ import annotations",
+        "import json",
+        "import importlib",
+        "import promin as pm",
+        "from manim import *",
+        "from promin.render import (",
+        "    _ManimStateRenderer,",
+        "    RenderConfig,",
+        "    register_layout,",
+        ")",
+        "",
+        f"FRAMES = json.loads({frames_json!r})",
+    ]
+    if layout_bootstrap:
+        header.extend(["", layout_bootstrap])
+    header.append("")
+
+    scene_src = textwrap.dedent(
         f"""\
-        import json
-        from manim import *
-        from promin.render import _ManimStateRenderer, RenderConfig
-
-        FRAMES = json.loads({frames_json!r})
-
         class ProminScene(Scene):
             def construct(self):
                 {bg_line}
@@ -1098,8 +1377,9 @@ def _generate_scene_source(
 
                 renderer.clear()
                 self.wait(1.0)
-    """
+        """
     )
+    return "\n".join(header) + scene_src
 
 
 # ---------------------------------------------------------------------------

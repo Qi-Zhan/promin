@@ -14,7 +14,8 @@ BLACK = "black"
 NIL_KEY = "NIL"
 
 
-@pm.register_class(
+@pm.register_type(
+    layout={"name": "tree", "params": {}},
     shape="circle",
     label="key",
     edges=[
@@ -51,9 +52,11 @@ def _make_nil() -> RBNode:
 SENTINEL = _make_nil()
 
 
-@pm.register_class(
+@pm.register_type(
+    layout={"name": "tree", "params": {}},
     shape="box",
     label="root",
+    content_field="root",
 )
 class RedBlackTree:
 

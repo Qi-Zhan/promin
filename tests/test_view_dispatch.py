@@ -132,11 +132,16 @@ def test_registered_class_view_format_label():
     assert view.format_label(Dummy()) == "99"
 
 
-def test_register_class_creates_registered_class_view():
-    """@register_class should register a RegisteredClassView, not TreeView."""
+def test_register_type_creates_registered_class_view():
+    """@register_type should register a RegisteredClassView."""
     import promin as pm
 
-    @pm.register_class(shape="box", label="val", edges=["child"])
+    @pm.register_type(
+        layout={"name": "tree", "params": {}},
+        shape="box",
+        label="val",
+        edges=["child"],
+    )
     class TestNode:
         def __init__(self):
             self.val = 7
@@ -147,3 +152,79 @@ def test_register_class_creates_registered_class_view():
     assert view.node_view.shape == "box"
     assert view.node_view.label == "val"
     assert view.format_label(TestNode()) == "7"
+
+
+def test_register_value_view_overrides_list_formatting():
+    """Public API should allow overriding the default view for built-in types."""
+    import promin as pm
+
+    class CellListView(pm.ListView):
+        def format_label(self, value):
+            if not value:
+                return "[]"
+            return "[" + " | ".join(pm.View.format_value(v) for v in value) + "]"
+
+    old_factory = pm.View._type_to_view[list]
+    try:
+        pm.register_value_view(list, lambda: CellListView())
+        assert pm.View.format_value([1, 2, 3]) == "[1 | 2 | 3]"
+    finally:
+        pm.View.register(list, old_factory)
+
+
+def test_register_type_can_override_builtin_list_spec():
+    import promin as pm
+    from promin.trace import snapshot_objects
+
+    pm.register_type(
+        list,
+        layout={"name": "row", "params": {}},
+        shape="diamond",
+        label="size",
+        data=["size"],
+        label_resolver=lambda v: len(v),
+        data_resolver=lambda v: {"size": len(v)},
+        children_resolver=lambda v: {},
+        register_view=False,
+    )
+    snap = snapshot_objects([[1, 2]])[0]
+    assert snap["_type"] == "list"
+    assert snap["_view"]["shape"] == "diamond"
+    assert snap["size"] == 2
+
+    # restore built-in list default to avoid cross-test pollution
+    pm.register_type(
+        list,
+        layout={"name": "row", "params": {"wrap": True, "columns": 8}},
+        shape="box",
+        label="summary",
+        edges=[pm.EdgeSpec(field="elements", direction="right")],
+        data=["summary"],
+        type_name="list",
+        label_resolver=lambda v: f"len={len(v)}",
+        children_resolver=lambda v: {"elements": list(v)},
+        data_resolver=lambda v: {"summary": f"len={len(v)}"},
+        register_view=False,
+    )
+
+
+def test_register_value_view_can_override_list_type_view_spec():
+    import promin as pm
+    from promin.trace import snapshot_objects
+
+    class FancyListView(pm.ListView):
+        def type_view_spec(self):
+            return pm.TypeViewSpec(
+                shape="diamond",
+                label="summary",
+                data=["summary"],
+                layout=pm.LayoutSpec(name="tree", params={}),
+            )
+
+    pm.register_value_view(list, lambda: FancyListView())
+    snap = snapshot_objects([[1, 2, 3]])[0]
+    assert snap["_view"]["shape"] == "diamond"
+    assert snap["_view"]["layout"]["name"] == "tree"
+
+    # restore built-in list default view + type spec
+    pm.register_value_view(list, lambda: pm.ListView())

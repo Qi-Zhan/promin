@@ -22,7 +22,8 @@ from promin.trace import State, SourceLoc, compute_transition, snapshot_objects
 # B+ Tree Nodes
 # ---------------------------------------------------------------------------
 
-@pm.register_class(
+@pm.register_type(
+    layout={"name": "tree", "params": {}},
     shape="box",
     label="keys",
     edges=[pm.EdgeSpec(field="children")],
@@ -35,7 +36,11 @@ class BPInternal:
         self.children: list = children or []
 
 
-@pm.register_class(shape="circle", label="keys")
+@pm.register_type(
+    layout={"name": "row", "params": {}},
+    shape="circle",
+    label="keys",
+)
 class BPLeaf:
     """Leaf node — stores sorted data keys."""
 

@@ -1,7 +1,10 @@
 __version__ = "0.2.0"
 
+from typing import Callable
+
 from .trace import (
-    register_class,
+    register_type,
+    override_type_view_spec,
     snapshot_objects,
     State,
     SourceLoc,
@@ -14,7 +17,8 @@ from .trace import (
 )
 from .view import (
     EdgeSpec,
-    NodeView,
+    LayoutSpec,
+    TypeViewSpec,
     StyleContext,
     View,
     IntView,
@@ -28,4 +32,24 @@ from .view import (
     SetView,
     RegisteredClassView,
 )
-from .render import render_states, render_states_inline, RenderConfig
+from .render import (
+    register_layout,
+    LayoutContext,
+    LayoutResult,
+    render_states,
+    render_states_inline,
+    RenderConfig,
+)
+
+
+def register_value_view(value_type: type, view_factory: Callable[[], View]) -> None:
+    """Override value rendering and optionally structural type-view behavior.
+
+    Example:
+        register_value_view(list, lambda: MyListView())
+    """
+    View.register(value_type, view_factory)
+    view = view_factory()
+    spec = view.type_view_spec()
+    if spec is not None:
+        override_type_view_spec(value_type, spec)

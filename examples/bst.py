@@ -8,7 +8,12 @@ Usage:
 import promin as pm
 
 
-@pm.register_class(shape="circle", label="key", edges=["left", "right"])
+@pm.register_type(
+    layout={"name": "tree", "params": {}},
+    shape="circle",
+    label="key",
+    edges=["left", "right"],
+)
 class BSTNode:
 
     def __init__(self, key: int):
