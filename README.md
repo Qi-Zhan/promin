@@ -19,7 +19,7 @@ uv sync --group dev
 uv run -m pytest
 
 # Run an example (small output)
-uv run python examples/bst.py
+uv run python examples/rbtree.py
 ```
 
 ## Quick Start
@@ -34,35 +34,38 @@ import promin as pm
     shape="circle",
     label="key",
     edges=["left", "right"],
+    data=["color"],
 )
-class BSTNode:
-    def __init__(self, key: int):
+class RBNode:
+    def __init__(self, key: int, color: str = "red"):
         self.key = key
+        self.color = color
         self.left = None
         self.right = None
 ```
 
-完整示例见 [`examples/bst.py`](examples/bst.py)。
+完整示例见 [`examples/rbtree.py`](examples/rbtree.py)。
 
 ### 2. Record & Render
 
 ```python
-root = BSTNode(5)
-root.left = BSTNode(3)
-root.right = BSTNode(7)
+t = RedBlackTree()
+keys = [7, 3, 18, 10, 22, 8]
 
 sm = pm.StateMachine()
-sm.capture(root)
+t.insert(keys[0])
+sm.capture(t)
 
-with pm.record("Search for 4", sm):
-    pass
+with pm.record("RBTree insert", sm, trace_current=False):
+    for k in keys[1:]:
+        t.insert(k)
 
 sm.render(
-    path="media/bst_search_4.gif",
+    path="media/rbtree_insert.gif",
 )
 ```
 
-![BST Search](media/bst_search_4.gif)
+![RBTree Insert](media/rbtree_insert.gif)
 
 ## How It Works
 

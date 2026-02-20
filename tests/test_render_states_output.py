@@ -1,10 +1,11 @@
 from pathlib import Path
 
 from promin import render
+from promin.render import runtime
 
 
 def test_render_states_requests_and_moves_gif(monkeypatch, tmp_path):
-    monkeypatch.setattr(render, "_generate_scene_source", lambda *args, **kwargs: "")
+    monkeypatch.setattr(runtime, "_generate_scene_source", lambda *args, **kwargs: "")
 
     class _Result:
         returncode = 0
@@ -19,7 +20,7 @@ def test_render_states_requests_and_moves_gif(monkeypatch, tmp_path):
         produced.write_bytes(b"GIF89a")
         return _Result()
 
-    monkeypatch.setattr(render.subprocess, "run", fake_run)
+    monkeypatch.setattr(runtime.subprocess, "run", fake_run)
 
     out = render.render_states([], str(tmp_path / "demo.gif"))
 

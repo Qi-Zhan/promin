@@ -334,7 +334,7 @@ if __name__ == "__main__":
     t.insert(keys[0])
     sm.capture(t)
 
-    with pm.record("RBTree insert", sm):
+    with pm.record("RBTree insert", sm, trace_current=False):
         for k in keys[1:]:
             t.insert(k)
 
