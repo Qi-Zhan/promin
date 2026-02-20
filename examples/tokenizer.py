@@ -173,7 +173,7 @@ except ImportError:
 if __name__ == "__main__":
     if "--render" in sys.argv:
         print("Rendering tokenizer animation...")
-        path = scene.render("tokenizer.mp4", quality="low")
+        path = scene.render("tokenizer.gif", quality="low")
         print(f"Output: {path}")
     else:
         print("Dry-run preview (use --render to produce video)\n")

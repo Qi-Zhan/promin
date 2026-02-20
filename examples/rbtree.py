@@ -336,6 +336,6 @@ if __name__ == "__main__":
             t.insert(k)
 
     sm.render(
-        path="media/rbtree_insert.mp4",
+        path="media/rbtree_insert.gif",
         config=pm.RenderConfig(background_color="#F5F0EB"),
     )

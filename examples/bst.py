@@ -61,10 +61,10 @@ if __name__ == "__main__":
     sm.capture(root)
     with pm.record("Search for 4", sm):
         root.search(4)
-    sm.render(path="media/bst_search_4.mp4")
+    sm.render(path="media/bst_search_4.gif")
 
     sm = pm.StateMachine()
     sm.capture(root)
     with pm.record("Insert for 9", sm):
         root.insert(9)
-    sm.render(path="media/bst_insert_9.mp4")
+    sm.render(path="media/bst_insert_9.gif")

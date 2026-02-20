@@ -150,7 +150,7 @@ def demo_insert():
         tree.insert(key)
         _snap(sm, tree, label=f"insert({key})")
 
-    sm.render(path="media/bptree_insert.mp4", title="B+ Tree Insert (order=4)")
+    sm.render(path="media/bptree_insert.gif", title="B+ Tree Insert (order=4)")
 
 
 def demo_search():
@@ -174,7 +174,7 @@ def demo_search():
     _snap(sm, tree, label=f"{'found' if found else 'not found'} {target}",
           focused_id=id(node))
 
-    sm.render(path="media/bptree_search.mp4", title=f"B+ Tree Search({target})")
+    sm.render(path="media/bptree_search.gif", title=f"B+ Tree Search({target})")
 
 
 if __name__ == "__main__":

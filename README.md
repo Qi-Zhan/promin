@@ -72,7 +72,7 @@ with pm.record("RBTree insert", sm):
         t.insert(k)
 # Finally, render the captured states to a video
 sm.render(
-    path="media/rbtree_insert.mp4",
+    path="media/rbtree_insert.gif",
     config=pm.RenderConfig(background_color="#F5F0EB"),
 )
 ```
@@ -142,14 +142,14 @@ class BPInternal:
 
 | File                    | Description                          | Output                       |
 |-------------------------|--------------------------------------|------------------------------|
-| `examples/rbtree.py`   | Red-Black tree insert                | `media/rbtree_insert.mp4`    |
-| `examples/bst.py`      | Binary search tree insert & search   | `media/bst_*.mp4`            |
-| `examples/bptree.py`   | B+ tree insert & search              | `media/bptree_*.mp4`         |
+| `examples/rbtree.py`   | Red-Black tree insert                | `media/rbtree_insert.gif`    |
+| `examples/bst.py`      | Binary search tree insert & search   | `media/bst_*.gif`            |
+| `examples/bptree.py`   | B+ tree insert & search              | `media/bptree_*.gif`         |
 
 Run any example (videos are written to `media/`):
 
 ```bash
-uv run python examples/rbtree.py    # → media/rbtree_insert.mp4
-uv run python examples/bst.py       # → media/bst_search_4.mp4, media/bst_insert_9.mp4
-uv run python examples/bptree.py    # → media/bptree_insert.mp4, media/bptree_search.mp4
+uv run python examples/rbtree.py    # → media/rbtree_insert.gif
+uv run python examples/bst.py       # → media/bst_search_4.gif, media/bst_insert_9.gif
+uv run python examples/bptree.py    # → media/bptree_insert.gif, media/bptree_search.gif
 ```

@@ -952,7 +952,7 @@ def render_states(
     config: RenderConfig | None = None,
 ) -> Path:
     """
-    Render a sequence of ``State`` objects into a manim video.
+    Render a sequence of ``State`` objects into a manim media file.
 
     Generates a temporary manim Scene script, invokes ``manim`` CLI, and
     writes the result to *path*.  Returns the resolved output path.
@@ -962,7 +962,7 @@ def render_states(
     states : list[State]
         The state sequence (from ``StateMachine.states``).
     path : str
-        Output video file path (e.g. ``"bst_search.mp4"``).
+        Output media path (e.g. ``"bst_search.gif"``).
     fps : int
         Frames per second.
     title : str
@@ -973,6 +973,10 @@ def render_states(
     cfg = config or RenderConfig()
     out = Path(path).resolve()
     logger.info("render_states: %d states -> %s", len(states), out)
+    format_ext = out.suffix.lower().lstrip(".") or "mp4"
+    if format_ext == "mov":
+        format_ext = "mp4"
+    output_name = out.stem if out.suffix else out.name
 
     # Build the scene class source dynamically so we can invoke manim CLI
     scene_src = _generate_scene_source(states, title=title, config=cfg)
@@ -988,12 +992,14 @@ def render_states(
             "manim",
             "render",
             quality_flag,
+            "--format",
+            format_ext,
             "--fps",
             str(fps),
             "--media_dir",
             tmp,
             "-o",
-            out.name,
+            output_name,
             str(script),
             "ProminScene",
         ]
@@ -1003,13 +1009,19 @@ def render_states(
             raise RuntimeError(f"manim render failed (exit {result.returncode})")
 
         # manim puts the file somewhere under media_dir — find it
-        candidates = list(Path(tmp).rglob(out.name))
+        candidates = list(Path(tmp).rglob(f"{output_name}.{format_ext}"))
+        if not candidates:
+            candidates = list(Path(tmp).rglob(out.name))
         if candidates:
             import shutil
 
             out.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(candidates[0]), str(out))
             logger.info("render_states: moved output to %s", out)
+        else:
+            raise RuntimeError(
+                f"manim render succeeded but output file was not found for {out.name}"
+            )
 
     return out
 

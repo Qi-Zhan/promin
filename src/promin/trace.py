@@ -463,8 +463,8 @@ class StateMachine:
         """
         Render the recorded states.
 
-        If *path* ends with a video extension (``.mp4``, ``.mov``, ``.webm``),
-        produce a manim video.  Otherwise print a text visualization.
+        If *path* ends with a video extension (``.mp4``, ``.mov``, ``.webm``,
+        or ``.gif``), render media using that suffix.
 
         Parameters
         ----------
