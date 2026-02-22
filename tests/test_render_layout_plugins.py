@@ -2,7 +2,7 @@ import pytest
 
 import promin as pm
 from promin.render import layout_tree
-from promin.trace import snapshot_objects
+from promin.tracing.trace import snapshot_objects
 
 
 @pm.register_type(

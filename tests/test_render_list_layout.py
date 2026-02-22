@@ -1,5 +1,5 @@
 from promin.render import layout_tree
-from promin.trace import snapshot_objects
+from promin.tracing.trace import snapshot_objects
 
 
 def test_list_layout_places_elements_left_to_right():

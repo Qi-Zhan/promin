@@ -1,5 +1,5 @@
 from promin.render import layout_tree
-from promin.trace import register_type, snapshot_objects
+from promin.tracing.trace import register_type, snapshot_objects
 
 
 @register_type(

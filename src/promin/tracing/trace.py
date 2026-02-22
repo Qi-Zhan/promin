@@ -1,5 +1,5 @@
 """
-promin.trace — Automatic state tracking via sys.settrace.
+promin.tracing.trace — Automatic state tracking via sys.settrace.
 
 Core pipeline::
 
@@ -19,8 +19,8 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from .render import RenderConfig, render_states, render_tree_text
-from .tracing.registry import (
+from ..render import RenderConfig, render_states, render_tree_text
+from .registry import (
     _registered_types,
     override_type_view_spec,
     register_type,

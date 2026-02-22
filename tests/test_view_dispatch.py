@@ -174,7 +174,7 @@ def test_register_value_view_overrides_list_formatting():
 
 def test_register_type_can_override_builtin_list_spec():
     import promin as pm
-    from promin.trace import snapshot_objects
+    from promin.tracing.trace import snapshot_objects
 
     pm.register_type(
         list,
@@ -210,7 +210,7 @@ def test_register_type_can_override_builtin_list_spec():
 
 def test_register_value_view_can_override_list_type_view_spec():
     import promin as pm
-    from promin.trace import snapshot_objects
+    from promin.tracing.trace import snapshot_objects
 
     class FancyListView(pm.ListView):
         def type_view_spec(self):

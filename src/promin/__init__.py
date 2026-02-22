@@ -2,7 +2,8 @@ __version__ = "0.2.0"
 
 from typing import Callable
 
-from .trace import (
+from .tracing import trace
+from .tracing.trace import (
     register_type,
     override_type_view_spec,
     snapshot_objects,

@@ -1,4 +1,4 @@
-from promin.trace import snapshot_objects
+from promin.tracing.trace import snapshot_objects
 
 
 def test_int_and_bool_snapshot_as_nodes():
