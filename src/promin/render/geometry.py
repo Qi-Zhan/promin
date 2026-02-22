@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from .layout_engine import LayoutNode, _flatten_nodes
-from .types import BOX_HEIGHT, BOX_WIDTH, EDGE_COLOR, EDGE_STROKE, H_GAP, NODE_RADIUS
+from .types import BOX_HEIGHT, BOX_WIDTH, H_GAP, NODE_RADIUS
 
 
 def _node_pos(node: LayoutNode, origin: np.ndarray) -> np.ndarray:

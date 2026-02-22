@@ -28,6 +28,20 @@ from .registry import (
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "FieldChange",
+    "NodeChange",
+    "SourceLoc",
+    "State",
+    "StateMachine",
+    "Transition",
+    "compute_transition",
+    "override_type_view_spec",
+    "record",
+    "register_type",
+    "snapshot_objects",
+]
+
 
 @dataclass
 class SourceLoc:
@@ -521,7 +535,7 @@ class _RecordContext:
 
     # ---- trace callback --------------------------------------------------
 
-    def _trace(self, frame, event, arg):
+    def _trace(self, frame, event, _arg):
         if event == "call":
             filename = frame.f_code.co_filename
             if not filename.startswith(self._base_dir):

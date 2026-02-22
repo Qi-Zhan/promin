@@ -24,7 +24,6 @@ class _TypeInfo:
 
     type_name: str
     view: TypeViewSpec
-    typ: type
     skip_if: Optional[Callable] = None
     label_resolver: Optional[Callable[[Any], Any]] = None
     children_resolver: Optional[Callable[[Any], dict[str, Any]]] = None
@@ -117,7 +116,6 @@ def register_type(
         _registered_types[target_cls] = _TypeInfo(
             type_name=name,
             view=view,
-            typ=target_cls,
             skip_if=skip_if,
             label_resolver=label_resolver,
             children_resolver=children_resolver,

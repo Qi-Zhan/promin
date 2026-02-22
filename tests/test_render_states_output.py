@@ -5,13 +5,15 @@ from promin.render import runtime
 
 
 def test_render_states_requests_and_moves_gif(monkeypatch, tmp_path):
-    monkeypatch.setattr(runtime, "_generate_scene_source", lambda *args, **kwargs: "")
+    monkeypatch.setattr(runtime, "_generate_scene_source", lambda *_args, **_kwargs: "")
 
     class _Result:
         returncode = 0
         stderr = ""
 
     def fake_run(cmd, capture_output=True, text=True):
+        assert capture_output is True
+        assert text is True
         media_dir = Path(cmd[cmd.index("--media_dir") + 1])
         output_name = cmd[cmd.index("-o") + 1]
         fmt = cmd[cmd.index("--format") + 1]
