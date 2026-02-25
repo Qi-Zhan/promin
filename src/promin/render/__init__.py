@@ -1,5 +1,5 @@
 from .layout_engine import layout_tree
-from .layout_registry import register_layout
+from .layout_registry import TreeLayout, RowLayout, ColumnLayout, GridLayout, RadialLayout
 from .mobjects import _make_edge
 from .runtime import render_states, render_states_inline
 from .scene import _ManimStateRenderer
@@ -10,7 +10,11 @@ __all__ = [
     'LayoutContext',
     'LayoutResult',
     'RenderConfig',
-    'register_layout',
+    'TreeLayout',
+    'RowLayout',
+    'ColumnLayout',
+    'GridLayout',
+    'RadialLayout',
     'layout_tree',
     '_make_edge',
     '_ManimStateRenderer',

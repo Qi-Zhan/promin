@@ -13,7 +13,7 @@ def test_tree_layout_does_not_overlap_cross_grandchildren():
 
     pm.register_type(
         N,
-        layout={"name": "tree", "params": {}},
+        layout=pm.TreeLayout,
         shape="circle",
         label="key",
         edges=["left", "right"],

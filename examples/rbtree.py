@@ -15,14 +15,13 @@ NIL_KEY = "NIL"
 
 
 @pm.register_type(
-    layout={"name": "tree", "params": {}},
+    layout=pm.TreeLayout,
     shape="circle",
     label="key",
     edges=[
         pm.EdgeSpec(field="left", direction="left"),
         pm.EdgeSpec(field="right", direction="right"),
     ],
-    data=["color"],
     color_field="color",
     color_map={
         "red": "#CC0000",
@@ -53,7 +52,7 @@ SENTINEL = _make_nil()
 
 
 @pm.register_type(
-    layout={"name": "tree", "params": {}},
+    layout=pm.TreeLayout,
     shape="box",
     label="root",
     content_field="root",

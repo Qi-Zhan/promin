@@ -6,7 +6,7 @@ Users describe *how* to render a type via :func:`register_type` parameters:
 * **shape** — ``"circle"``, ``"box"``, ``"diamond"``
 * **label** — which field is shown inside the shape (e.g. ``"key"``)
 * **edges** — which fields are connections to other nodes
-* **data**  — extra tracked fields (not rendered as connections)
+* **color_field** — optional field controlling node color and tracked automatically
 
 These specs are stored in :class:`NodeView` and embedded in snapshots so
 the renderer can be fully data-driven.
@@ -16,38 +16,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Optional, Callable
-
-
-@dataclass
-class LayoutSpec:
-    """Declarative layout selector and arguments."""
-
-    name: str
-    params: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"name": self.name, "params": dict(self.params)}
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "LayoutSpec":
-        return cls(name=d.get("name", ""), params=dict(d.get("params", {})))
-
-
-def normalize_layout_spec(raw: Any) -> LayoutSpec:
-    """Normalize a raw layout value into a LayoutSpec."""
-    if isinstance(raw, LayoutSpec):
-        return raw
-    if isinstance(raw, str):
-        return LayoutSpec(name=raw, params={})
-    if isinstance(raw, dict):
-        name = raw.get("name")
-        if not isinstance(name, str):
-            raise TypeError("layout.name must be a non-empty string")
-        params = raw.get("params", {})
-        if not isinstance(params, dict):
-            raise TypeError("layout.params must be a dict")
-        return LayoutSpec(name=name, params=dict(params))
-    raise TypeError("layout must be LayoutSpec, dict, or str")
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +43,7 @@ class EdgeSpec:
     field: str
     direction: str = "auto"  # auto | left | right | down | up
     style: str = "solid"  # solid | dashed | dotted
-    layout: Optional[LayoutSpec] = None
+    layout: Optional[Any] = None
 
 
 def normalize_edges(raw: list[str | EdgeSpec]) -> list[EdgeSpec]:
@@ -85,8 +53,6 @@ def normalize_edges(raw: list[str | EdgeSpec]) -> list[EdgeSpec]:
         if isinstance(item, str):
             out.append(EdgeSpec(field=item))
         elif isinstance(item, EdgeSpec):
-            if item.layout is not None and not isinstance(item.layout, LayoutSpec):
-                item.layout = normalize_layout_spec(item.layout)
             out.append(item)
         else:
             raise TypeError(f"Expected str or EdgeSpec, got {type(item).__name__}")
@@ -113,8 +79,6 @@ class NodeView:
         Field name whose value is rendered as text inside the shape.
     edges : list[EdgeSpec]
         Fields that are structural connections to other nodes.
-    data : list[str]
-        Extra fields tracked in snapshots but not rendered as edges.
     color_field : str
         Field name whose runtime value determines the node fill color.
         The value is looked up in *color_map* to get the actual color string.
@@ -127,22 +91,24 @@ class NodeView:
     shape: Optional[str] = "circle"
     label: str = ""
     edges: list[EdgeSpec] = field(default_factory=list)
-    data: list[str] = field(default_factory=list)
     color_field: str = ""
     color_map: dict[str, str] = field(default_factory=dict)
-    layout: Optional[LayoutSpec] = None
+    layout: Optional[Any] = None
     content_field: str = ""
 
     # -- derived helpers --------------------------------------------------
 
     @property
     def fields(self) -> list[str]:
-        """All tracked attribute names (label + edge fields + data)."""
+        """All tracked attribute names declared by render semantics."""
         raw: list[str] = []
         if self.label:
             raw.append(self.label)
         raw.extend(e.field for e in self.edges)
-        raw.extend(self.data)
+        if self.color_field:
+            raw.append(self.color_field)
+        if self.content_field:
+            raw.append(self.content_field)
         return list(dict.fromkeys(raw))  # deduplicate, preserving order
 
     @property
@@ -167,12 +133,11 @@ class NodeView:
                     "field": e.field,
                     "direction": e.direction,
                     "style": e.style,
-                    "layout": e.layout.to_dict() if e.layout else None,
+                    "layout": e.layout,
                 }
                 for e in self.edges
             ],
-            "data": self.data,
-            "layout": self.layout.to_dict() if self.layout else None,
+            "layout": self.layout,
         }
         if self.content_field:
             d["content_field"] = self.content_field
@@ -193,22 +158,13 @@ class NodeView:
                     field=e["field"],
                     direction=e.get("direction", "auto"),
                     style=e.get("style", "solid"),
-                    layout=(
-                        normalize_layout_spec(e["layout"])
-                        if e.get("layout") is not None
-                        else None
-                    ),
+                    layout=e.get("layout"),
                 )
                 for e in d.get("edges", [])
             ],
-            data=d.get("data", []),
             color_field=d.get("color_field", ""),
             color_map=d.get("color_map", {}),
-            layout=(
-                normalize_layout_spec(d["layout"])
-                if d.get("layout") is not None
-                else None
-            ),
+            layout=d.get("layout"),
             content_field=d.get("content_field", ""),
         )
 
@@ -347,11 +303,12 @@ class BoolView(View):
         return str(value)
 
     def type_view_spec(self) -> Optional[TypeViewSpec]:
+        from .render.layout_registry import RowLayout
+
         return TypeViewSpec(
             shape="diamond",
             label="value",
-            data=["value"],
-            layout=LayoutSpec(name="row", params={}),
+            layout=RowLayout(),
         )
 
 
@@ -375,11 +332,12 @@ class IntView(View):
         return str(value)
 
     def type_view_spec(self) -> Optional[TypeViewSpec]:
+        from .render.layout_registry import RowLayout
+
         return TypeViewSpec(
             shape="box",
             label="value",
-            data=["value"],
-            layout=LayoutSpec(name="row", params={}),
+            layout=RowLayout(),
         )
 
 
@@ -405,6 +363,8 @@ class ListView(View):
         return "[" + ", ".join(items) + "]"
 
     def type_view_spec(self) -> Optional[TypeViewSpec]:
+        from .render.layout_registry import RowLayout
+
         return TypeViewSpec(
             shape="box",
             label="summary",
@@ -412,11 +372,10 @@ class ListView(View):
                 EdgeSpec(
                     field="elements",
                     direction="right",
-                    layout=LayoutSpec(name="row", params={"wrap": True, "columns": 8}),
+                    layout=RowLayout(wrap=True, columns=8),
                 )
             ],
-            data=["summary"],
-            layout=LayoutSpec(name="row", params={"wrap": True, "columns": 8}),
+            layout=RowLayout(wrap=True, columns=8),
         )
 
 
@@ -460,7 +419,7 @@ class RegisteredClassView(View):
     """View for a ``@register_type``-decorated type.
 
     Unlike the generic built-in views this one carries the full
-    :class:`NodeView` specification (shape, label field, edges, data)
+    :class:`NodeView` specification (shape, label field, and edges)
     so that ``View.for_value(obj)`` returns a view that actually knows
     how to describe the node.
     """

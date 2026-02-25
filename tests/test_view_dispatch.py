@@ -137,7 +137,7 @@ def test_register_type_creates_registered_class_view():
     import promin as pm
 
     @pm.register_type(
-        layout={"name": "tree", "params": {}},
+        layout=pm.TreeLayout,
         shape="box",
         label="val",
         edges=["child"],
@@ -178,10 +178,9 @@ def test_register_type_can_override_builtin_list_spec():
 
     pm.register_type(
         list,
-        layout={"name": "row", "params": {}},
+        layout=pm.RowLayout(),
         shape="diamond",
         label="size",
-        data=["size"],
         label_resolver=lambda v: len(v),
         data_resolver=lambda v: {"size": len(v)},
         children_resolver=lambda v: {},
@@ -195,11 +194,10 @@ def test_register_type_can_override_builtin_list_spec():
     # restore built-in list default to avoid cross-test pollution
     pm.register_type(
         list,
-        layout={"name": "row", "params": {"wrap": True, "columns": 8}},
+        layout=pm.RowLayout(wrap=True, columns=8),
         shape="box",
         label="summary",
         edges=[pm.EdgeSpec(field="elements", direction="right")],
-        data=["summary"],
         type_name="list",
         label_resolver=lambda v: f"len={len(v)}",
         children_resolver=lambda v: {"elements": list(v)},
@@ -217,14 +215,13 @@ def test_register_value_view_can_override_list_type_view_spec():
             return pm.TypeViewSpec(
                 shape="diamond",
                 label="summary",
-                data=["summary"],
-                layout=pm.LayoutSpec(name="tree", params={}),
+                layout=pm.TreeLayout,
             )
 
     pm.register_value_view(list, lambda: FancyListView())
     snap = snapshot_objects([[1, 2, 3]])[0]
     assert snap["_view"]["shape"] == "diamond"
-    assert snap["_view"]["layout"]["name"] == "tree"
+    assert snap["_view"]["layout"] is pm.TreeLayout
 
     # restore built-in list default view + type spec
     pm.register_value_view(list, lambda: pm.ListView())

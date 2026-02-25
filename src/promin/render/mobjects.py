@@ -24,7 +24,6 @@ from .types import (
     BOX_HEIGHT,
     BOX_WIDTH,
     CONTAINER_FILL_OPACITY,
-    CONTAINER_LABEL_SIZE,
     CONTAINER_STROKE,
     EDGE_COLOR,
     EDGE_STROKE,
@@ -113,20 +112,6 @@ def _make_node_mob(info: _NodeRenderInfo) -> VGroup:
         txt = Text(str(info.text), font="Menlo", font_size=font_size, color=txt_color)
         txt.move_to(pos)
         parts.append(txt)
-
-    if info.type_label:
-        lbl_color = _contrast_text_color(info.fill_color) if info.fill_color else GREY_A
-        lbl = Text(
-            info.type_label,
-            font="Menlo",
-            font_size=CONTAINER_LABEL_SIZE,
-            color=lbl_color,
-        )
-        lbl.move_to(
-            body.get_corner(UP + np.array([-1, 0, 0])) + np.array([lbl.width / 2 + 0.12, -0.18, 0])
-        )
-        lbl.set_z_index(info.z_index)
-        parts.append(lbl)
 
     return VGroup(*parts)
 

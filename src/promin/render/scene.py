@@ -73,16 +73,23 @@ class _ManimStateRenderer:
         self._overlay: list[VMobject] = []
 
     def show_state(self, snapshot: Any, loc_text: str = "", counter_text: str = "") -> None:
-        snapshots = snapshot if isinstance(snapshot, list) else [snapshot]
+        payload = build_render_payload(snapshot, origin=self.origin)
+        self.show_render_payload(payload, loc_text=loc_text, counter_text=counter_text)
 
-        new_info: dict[int, _NodeRenderInfo] = {}
-        new_edges: dict[tuple[int, int], str] = {}
-        for snap in snapshots:
-            lr = layout_tree(snap)
-            if lr is not None:
-                new_info.update(_collect_render_info(lr, self.origin))
-                new_edges.update(_collect_layout_edges(lr))
+    def show_render_payload(self, payload: dict[str, Any], loc_text: str = "", counter_text: str = "") -> None:
+        new_info = _node_info_map_from_payload(payload)
+        new_edges = {(int(e["parent"]), int(e["child"])): e["style"] for e in payload.get("edges", [])}
 
+        self._animate_to_state(new_info, new_edges, loc_text=loc_text, counter_text=counter_text)
+
+    def _animate_to_state(
+        self,
+        new_info: dict[int, _NodeRenderInfo],
+        new_edges: dict[tuple[int, int], str],
+        *,
+        loc_text: str,
+        counter_text: str,
+    ) -> None:
         anims: list = []
 
         for m in self._overlay:
@@ -170,3 +177,59 @@ class _ManimStateRenderer:
         self._node_mobs.clear()
         self._edge_mobs.clear()
         self._overlay.clear()
+
+
+def _node_info_to_payload(info: _NodeRenderInfo) -> dict[str, Any]:
+    return {
+        "node_id": int(info.node_id),
+        "pos": [float(info.pos[0]), float(info.pos[1]), float(info.pos[2])],
+        "shape": info.shape,
+        "fill_color": info.fill_color,
+        "focused": bool(info.focused),
+        "text": info.text,
+        "width": info.width,
+        "height": info.height,
+        "type_label": info.type_label,
+        "z_index": int(info.z_index),
+    }
+
+
+def _node_info_map_from_payload(payload: dict[str, Any]) -> dict[int, _NodeRenderInfo]:
+    out: dict[int, _NodeRenderInfo] = {}
+    for raw in payload.get("nodes", []):
+        pos = raw.get("pos", [0.0, 0.0, 0.0])
+        info = _NodeRenderInfo(
+            node_id=int(raw["node_id"]),
+            pos=np.array([float(pos[0]), float(pos[1]), float(pos[2])]),
+            shape=raw["shape"],
+            fill_color=raw.get("fill_color"),
+            focused=bool(raw.get("focused", False)),
+            text=raw.get("text", ""),
+            width=raw.get("width"),
+            height=raw.get("height"),
+            type_label=raw.get("type_label", ""),
+            z_index=int(raw.get("z_index", 0)),
+        )
+        out[info.node_id] = info
+    return out
+
+
+def build_render_payload(snapshot: Any, origin: np.ndarray | None = None) -> dict[str, Any]:
+    origin_arr = origin if origin is not None else np.array([0.0, 0.5, 0.0])
+    snapshots = snapshot if isinstance(snapshot, list) else [snapshot]
+
+    combined_info: dict[int, _NodeRenderInfo] = {}
+    combined_edges: dict[tuple[int, int], str] = {}
+    for snap in snapshots:
+        lr = layout_tree(snap)
+        if lr is None:
+            continue
+        combined_info.update(_collect_render_info(lr, origin_arr))
+        combined_edges.update(_collect_layout_edges(lr))
+
+    nodes = [_node_info_to_payload(info) for _, info in sorted(combined_info.items())]
+    edges = [
+        {"parent": int(pid), "child": int(cid), "style": style}
+        for (pid, cid), style in sorted(combined_edges.items())
+    ]
+    return {"nodes": nodes, "edges": edges}

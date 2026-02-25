@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import json
 from typing import Any, Optional
 
-from ..view import LayoutSpec, normalize_layout_spec
-from .layout_registry import _require_layout
 from .snapshot_view import _get_label, _get_node_color, _get_view, _is_container_snapshot, _resolve_snapshot
 from .types import H_GAP, MAX_SCENE_WIDTH, V_GAP, LayoutContext, LayoutResult
 
@@ -46,8 +43,11 @@ class LayoutNode:
             raise ValueError(
                 f"Missing layout for node type '{self.type_name}'. No default layout is allowed."
             )
-        self.layout_spec: LayoutSpec = normalize_layout_spec(raw_layout)
-        _require_layout(self.layout_spec.name)
+        if not callable(raw_layout):
+            raise TypeError(
+                f"layout for node type '{self.type_name}' must be callable, got {type(raw_layout).__name__}"
+            )
+        self.layout_spec = raw_layout
 
         self.content_type: str = "text"
         self.content_root: Optional[LayoutNode] = None
@@ -113,8 +113,11 @@ def layout_tree(snapshot: Any) -> Optional[LayoutNode]:
             raise ValueError(
                 f"Missing layout for node type '{container.type_name}'. No default layout is allowed."
             )
-        container.layout_spec = normalize_layout_spec(raw_layout)
-        _require_layout(container.layout_spec.name)
+        if not callable(raw_layout):
+            raise TypeError(
+                f"layout for node type '{container.type_name}' must be callable, got {type(raw_layout).__name__}"
+            )
+        container.layout_spec = raw_layout
         container.x = 0.0
         container.y = 0.0
         return container
@@ -130,10 +133,14 @@ def _assign_positions(node: LayoutNode, depth: int) -> None:
     node.x = 0.0
     node.y = -depth * V_GAP
 
-    def _layout_for_edge(n: LayoutNode, spec: dict) -> LayoutSpec:
+    def _layout_for_edge(n: LayoutNode, spec: dict):
         raw = spec.get("layout")
         if raw is not None:
-            return normalize_layout_spec(raw)
+            if not callable(raw):
+                raise TypeError(
+                    f"Edge layout for field '{spec.get('field')}' must be callable, got {type(raw).__name__}"
+                )
+            return raw
         if n.layout_spec is None:
             raise ValueError(
                 f"Node '{n.type_name}' has no layout and edge '{spec.get('field')}' does not provide one."
@@ -148,13 +155,12 @@ def _assign_positions(node: LayoutNode, depth: int) -> None:
             return
 
         specs = [_layout_for_edge(n, spec) for _, spec in real_pairs]
-        key_set = {(s.name, json.dumps(s.params, sort_keys=True)) for s in specs}
+        key_set = {id(s) for s in specs}
         if len(key_set) != 1:
             raise ValueError(
                 f"Node '{n.type_name}' has mixed child layouts. Use one layout per node level."
             )
-        layout_spec = specs[0]
-        layout_fn = _require_layout(layout_spec.name)
+        layout_fn = specs[0]
         ctx = LayoutContext(
             parent_id=n.node_id,
             children=[
@@ -166,20 +172,20 @@ def _assign_positions(node: LayoutNode, depth: int) -> None:
                 }
                 for i, (child, spec) in enumerate(real_pairs)
             ],
-            params=dict(layout_spec.params),
+            params={},
             gap_x=gap_x,
             gap_y=V_GAP,
         )
         result = layout_fn(ctx)
         if not isinstance(result, LayoutResult):
             raise TypeError(
-                f"Layout '{layout_spec.name}' must return LayoutResult, got {type(result).__name__}"
+                f"Layout must return LayoutResult, got {type(result).__name__}"
             )
 
         missing = [c.node_id for c, _ in real_pairs if c.node_id not in result.positions]
         if missing:
             raise ValueError(
-                f"Layout '{layout_spec.name}' did not return coordinates for child ids: {missing}"
+                f"Layout did not return coordinates for child ids: {missing}"
             )
 
         for child, _ in real_pairs:
@@ -191,13 +197,13 @@ def _assign_positions(node: LayoutNode, depth: int) -> None:
                 or not isinstance(dx_dy[1], (int, float))
             ):
                 raise ValueError(
-                    f"Layout '{layout_spec.name}' returned invalid coordinate for child id {child.node_id}: {dx_dy!r}"
+                    f"Layout returned invalid coordinate for child id {child.node_id}: {dx_dy!r}"
                 )
             dx, dy = dx_dy
             child.x = n.x + float(dx)
             child.y = n.y + float(dy)
             next_gap_x = gap_x
-            if layout_spec.name == "tree":
+            if getattr(layout_fn, "_promin_layout_kind", "") == "tree":
                 next_gap_x = max(0.35, gap_x * 0.5)
             walk(child, next_gap_x)
 

@@ -5,7 +5,7 @@ from promin.render import layout_tree
 from promin.tracing.trace import snapshot_objects
 
 
-def test_register_layout_and_use_in_node_layout():
+def test_custom_layout_callable_and_use_in_node_layout():
     def zigzag(ctx: pm.LayoutContext) -> pm.LayoutResult:
         out: dict[int, tuple[float, float]] = {}
         for i, child in enumerate(ctx.children):
@@ -15,10 +15,8 @@ def test_register_layout_and_use_in_node_layout():
             out[cid] = ((-1.0 if i % 2 else 1.0) * (i + 1), -(i + 1) * ctx.gap_y)
         return pm.LayoutResult(positions=out)
 
-    pm.register_layout("zigzag_test", zigzag)
-
     @pm.register_type(
-        layout={"name": "zigzag_test", "params": {}},
+        layout=zigzag,
         shape="circle",
         label="key",
         edges=["a", "b"],
@@ -30,7 +28,7 @@ def test_register_layout_and_use_in_node_layout():
             self.b = _Leaf(3)
 
     @pm.register_type(
-        layout={"name": "row", "params": {}},
+        layout=pm.RowLayout(),
         shape="box",
         label="v",
     )
@@ -47,16 +45,41 @@ def test_register_layout_and_use_in_node_layout():
     assert xs[0] != xs[1]
 
 
-def test_unknown_layout_name_raises():
+def test_unknown_builtin_layout_kind_raises():
     @pm.register_type(
-        layout={"name": "does_not_exist_layout", "params": {}},
+        layout=pm.TreeLayout,
         shape="circle",
         label="key",
+        edges=["left"],
     )
     class _N:
         def __init__(self):
             self.key = 1
+            self.left = None
 
-    snap = snapshot_objects([_N()])[0]
-    with pytest.raises(ValueError, match="Unknown layout"):
+    n = _N()
+    n.left = _N()
+    snap = snapshot_objects([n])[0]
+    snap["_view"]["layout"] = object()
+    with pytest.raises(TypeError, match="must be callable"):
         layout_tree(snap)
+
+
+def test_register_layout_removed_from_public_api():
+    assert not hasattr(pm, "register_layout")
+
+
+def test_register_type_rejects_dict_layout():
+    @pm.register_type(
+        layout=pm.TreeLayout,
+        shape="circle",
+        label="key",
+    )
+    class _Tmp:
+        def __init__(self):
+            self.key = 1
+
+    with pytest.raises(TypeError, match="must be callable"):
+        pm.register_type(layout={"name": "tree", "params": {}}, shape="circle", label="key")(
+            _Tmp
+        )

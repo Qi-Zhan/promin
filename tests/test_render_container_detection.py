@@ -1,9 +1,10 @@
+import promin as pm
 from promin.render import layout_tree
 from promin.tracing.trace import register_type, snapshot_objects
 
 
 @register_type(
-    layout={"name": "tree", "params": {}},
+    layout=pm.TreeLayout,
     shape="circle",
     label="key",
     edges=["left", "right"],

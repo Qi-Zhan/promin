@@ -17,11 +17,8 @@ def _stack_column_layout(ctx: pm.LayoutContext) -> pm.LayoutResult:
         positions[cid] = (0.0, -(i + 1) * ctx.gap_y)
     return pm.LayoutResult(positions=positions)
 
-
-pm.register_layout("stack_column", _stack_column_layout)
-
 @pm.register_type(
-    layout={"name": "stack_column", "params": {}},
+    layout=_stack_column_layout,
     shape="box",
     label="name",
     edges=[
@@ -29,13 +26,11 @@ pm.register_layout("stack_column", _stack_column_layout)
             field="elements",
             direction="down",
             style="solid",
-            layout=pm.LayoutSpec(name="stack_column", params={}),
+            layout=_stack_column_layout,
         )
     ],
-    data=["name"],
     label_resolver=lambda s: "Stack",
     children_resolver=lambda s: {"elements": list(s.items)},
-    data_resolver=lambda s: {"name": "Stack"},
 )
 class Stack:
     def __init__(self):

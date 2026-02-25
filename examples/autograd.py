@@ -2,7 +2,7 @@ import promin as pm
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  Value — micrograd-style autograd engine with promin instrumentation
+#  Value — micrograd-style autograd engine
 # ══════════════════════════════════════════════════════════════════════
 
 _value_counter = 0
@@ -17,9 +17,6 @@ def _next_id():
 class Value:
     """
     Stores a single scalar value and its gradient.
-
-    Identical to micrograd's Value, plus pm.emit() calls that let promin
-    visualize the computation graph and backpropagation.
     """
 
     def __init__(self, data, _children=(), _op="", label=""):

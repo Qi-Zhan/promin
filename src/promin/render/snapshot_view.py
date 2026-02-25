@@ -15,7 +15,6 @@ def _get_view(snapshot: dict) -> dict:
         "label": view.get("label", ""),
         "edges": [e["field"] for e in view.get("edges", [])],
         "edge_specs": view.get("edges", []),
-        "data": view.get("data", []),
         "color_field": view.get("color_field", ""),
         "color_map": view.get("color_map", {}),
         "layout": view.get("layout"),
@@ -132,15 +131,5 @@ def render_tree_text(snapshot: Any, indent: int = 0, prefix: str = "") -> str:
                     lines.append(render_tree_text(item, indent + 4, f"{f}[{i}]: "))
             else:
                 lines.append(render_tree_text(child_val, indent + 4, f"{f}: "))
-
-    for f in view["data"]:
-        if f in snapshot:
-            val = snapshot[f]
-            if isinstance(val, dict) and "_type" in val:
-                lines.append(render_tree_text(val, indent + 4, f"{f}: "))
-            elif isinstance(val, list):
-                lines.append(f"{pad}    {f}: {_format_label_value(val)}")
-            else:
-                lines.append(f"{pad}    {f}: {val!r}")
 
     return "\n".join(lines)

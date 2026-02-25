@@ -11,8 +11,7 @@ from pathlib import Path
 import numpy as np
 from manim import DOWN, UP, FadeIn, Scene, Text, YELLOW_C
 
-from .layout_registry import _custom_layout_bootstrap_code
-from .scene import _ManimStateRenderer
+from .scene import _ManimStateRenderer, build_render_payload
 from .snapshot_view import _contrast_text_color
 from .types import RenderConfig
 
@@ -89,13 +88,11 @@ def _generate_scene_source(
     for s in states:
         frames.append(
             {
-                "snapshot": s.snapshot,
+                "payload": build_render_payload(s.snapshot),
                 "loc": repr(s.current_loc) if s.current_loc else None,
             }
         )
     frames_json = json.dumps(frames, default=str)
-    layout_bootstrap = _custom_layout_bootstrap_code()
-
     bg = cfg.background_color or "#000000"
     if cfg.text_color == "auto":
         text_color = _contrast_text_color(bg)
@@ -110,19 +107,15 @@ def _generate_scene_source(
     header = [
         "from __future__ import annotations",
         "import json",
-        "import importlib",
         "import promin as pm",
         "from manim import *",
         "from promin.render import (",
         "    _ManimStateRenderer,",
         "    RenderConfig,",
-        "    register_layout,",
         ")",
         "",
         f"FRAMES = json.loads({frames_json!r})",
     ]
-    if layout_bootstrap:
-        header.extend(["", layout_bootstrap])
     header.append("")
 
     scene_src = textwrap.dedent(
@@ -151,8 +144,8 @@ def _generate_scene_source(
                     loc = frame.get(\"loc\")
                     loc_text = f\"S{{i}}  {{loc}}\" if loc else \"\"
                     counter = f\"{{i+1}}/{{n}}\"
-                    renderer.show_state(
-                        frame[\"snapshot\"], loc_text=loc_text, counter_text=counter,
+                    renderer.show_render_payload(
+                        frame[\"payload\"], loc_text=loc_text, counter_text=counter,
                     )
                     self.wait(0.3)
 

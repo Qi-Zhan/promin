@@ -30,11 +30,11 @@ uv run python examples/rbtree.py
 import promin as pm
 
 @pm.register_type(
-    layout={"name": "tree", "params": {}},
+    layout=pm.TreeLayout,
     shape="circle",
     label="key",
     edges=["left", "right"],
-    data=["color"],
+    color_field="color",
 )
 class RBNode:
     def __init__(self, key: int, color: str = "red"):
@@ -84,12 +84,15 @@ sm.render(
 
 | Parameter   | Type                        | Description                                    |
 |-------------|---------------------------- |------------------------------------------------|
-| `layout`    | `dict`                      | Required. `{"name": "<layout>", "params": {...}}` |
+| `layout`    | `callable`                  | Required. `pm.TreeLayout` / `pm.RowLayout(...)` / custom function |
 | `shape`     | `str \| None`               | `"circle"`, `"box"`, `"diamond"`, or `None` (transparent wrapper) |
 | `label`     | `str`                       | Field name shown as text inside the shape       |
 | `edges`     | `list[str \| EdgeSpec]`     | Fields that are connections to other nodes       |
-| `data`      | `list[str]`                 | Extra tracked fields (not rendered as edges)     |
+| `color_field` | `str`                     | Optional field used for node color and tracked automatically |
 | `type_name` | `str`                       | Display name (defaults to class name)            |
+
+Only fields declared via `label` / `edges` / `color_field` / `content_field`
+are tracked. There is no extra tracked-field channel.
 
 ### Override Built-in Type Views (`list`)
 
@@ -100,10 +103,9 @@ import promin as pm
 
 pm.register_type(
     list,
-    layout={"name": "row", "params": {"wrap": True, "columns": 8}},
+    layout=pm.RowLayout(wrap=True, columns=8),
     shape="box",
     label="size",
-    data=["size"],
     label_resolver=lambda v: len(v),
     data_resolver=lambda v: {"size": len(v)},
     children_resolver=lambda v: {"elements": list(v)},
@@ -125,7 +127,12 @@ def stack_column(ctx: pm.LayoutContext) -> pm.LayoutResult:
             positions[cid] = (0.0, -(i + 1) * ctx.gap_y)
     return pm.LayoutResult(positions=positions)
 
-pm.register_layout("stack_column", stack_column)
+@pm.register_type(
+    layout=stack_column,
+    shape="box",
+    label="top",
+)
+class Stack: ...
 ```
 
 If you also want to override formatting/render dispatch, use
@@ -140,7 +147,7 @@ For fine-grained control over edge rendering:
 from promin import EdgeSpec
 
 @pm.register_type(
-    layout={"name": "tree", "params": {}},
+    layout=pm.TreeLayout,
     shape="box",
     label="keys",
     edges=[
@@ -153,7 +160,7 @@ class MyNode: ...
 
 - **`direction`** — `"auto"`, `"left"`, `"right"`, `"down"`, `"up"`
 - **`style`** — `"solid"`, `"dashed"`, `"dotted"`
-- **`layout`** — optional per-edge layout override: `{"name": "...", "params": {...}}`
+- **`layout`** — optional per-edge layout override: any layout callable (e.g. `pm.RowLayout(...)`)
 
 ### List Edges
 
@@ -162,7 +169,7 @@ If an edge field holds a **list** of registered objects (e.g. a B+ tree's
 
 ```python
 @pm.register_type(
-    layout={"name": "tree", "params": {}},
+    layout=pm.TreeLayout,
     shape="box",
     label="keys",
     edges=[EdgeSpec(field="children")],

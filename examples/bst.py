@@ -9,7 +9,7 @@ import promin as pm
 
 
 @pm.register_type(
-    layout={"name": "tree", "params": {}},
+    layout=pm.TreeLayout,
     shape="circle",
     label="key",
     edges=["left", "right"],
