@@ -14,20 +14,24 @@ BLACK = "black"
 NIL_KEY = "NIL"
 
 
-@pm.register_type(
-    layout=pm.TreeLayout,
-    shape="circle",
-    label="key",
-    edges=[
-        pm.EdgeSpec(field="left", direction="left"),
-        pm.EdgeSpec(field="right", direction="right"),
-    ],
-    color_field="color",
-    color_map={
-        "red": "#CC0000",
-        "black": "#1A1A1A",
-    },
-    skip_if=lambda node: node.key == NIL_KEY,
+@(
+    pm.type()
+    .shape("circle")
+    .show(lambda node: [node.key])
+    .fill(
+        lambda node: node.color,
+        map={
+            "red": "#CC0000",
+            "black": "#1A1A1A",
+        },
+    )
+    .links(
+        pm.links()
+        .items(lambda node: [node.left, node.right])
+        .hints(["left", "right"])
+        .layout(pm.tree)
+    )
+    .skip_if(lambda node: node.key == NIL_KEY)
 )
 @dataclass
 class RBNode:
@@ -51,12 +55,7 @@ def _make_nil() -> RBNode:
 SENTINEL = _make_nil()
 
 
-@pm.register_type(
-    layout=pm.TreeLayout,
-    shape="box",
-    label="root",
-    content_field="root",
-)
+@(pm.type("RedBlackTree").show(lambda tree: ["root", tree.root]))
 class RedBlackTree:
 
     def __init__(self):

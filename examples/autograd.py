@@ -1,3 +1,10 @@
+"""
+Autograd (micrograd-style) visualization with promin.
+
+Usage:
+    uv run python examples/autograd.py
+"""
+
 import promin as pm
 
 
@@ -8,12 +15,33 @@ import promin as pm
 _value_counter = 0
 
 
-def _next_id():
+def _next_id() -> int:
     global _value_counter
     _value_counter += 1
     return _value_counter
 
 
+def _value_label(v: "Value") -> str:
+    op = f" {v._op}" if v._op else ""
+    name = f"{v.label}{op}"
+    return f"{name}\nd={v.data:.4f}\ng={v.grad:.4f}"
+
+
+def _value_data(v: "Value") -> dict[str, float]:
+    return {"data": v.data, "grad": v.grad}
+
+
+@(
+    pm.type()
+    .shape("box")
+    .show(lambda v: [_value_label(v)])
+    .links(
+        pm.links()
+        .items(lambda v: list(v._prev))
+        .layout(pm.tree)
+    )
+    .data(_value_data)
+)
 class Value:
     """
     Stores a single scalar value and its gradient.
@@ -23,7 +51,7 @@ class Value:
         self.data = data
         self.grad = 0.0
         self._backward = lambda: None
-        self._prev = set(_children)
+        self._prev = list(_children)
         self._op = _op
         self.label = label or f"v{_next_id()}"
 
@@ -141,10 +169,7 @@ class Value:
 
 
 def neuron_example():
-    """
-    A single neuron: o = tanh(x1*w1 + x2*w2 + b)
-    Then backward() to compute gradients.
-    """
+    """A single neuron: o = tanh(x1*w1 + x2*w2 + b)."""
     global _value_counter
     _value_counter = 0
 
@@ -171,8 +196,6 @@ def neuron_example():
     o = n.tanh()
     o.label = "o"
 
-    o.backward()
-
     return o, [x1, x2, w1, w2, b, x1w1, x2w2, s, n, o]
 
 
@@ -181,10 +204,9 @@ def neuron_example():
 # ══════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    print(f"\n{'─' * 50}")
-    print("Computation graph (forward):")
-    o, nodes = neuron_example()
-    print(f"  o = tanh(x1*w1 + x2*w2 + b) = {o.data:.4f}")
-    print(f"\nGradients (backward):")
-    for v in nodes:
-        print(f"  {v.label:10s}  data={v.data:8.4f}  grad={v.grad:8.4f}")
+    o, _ = neuron_example()
+    sm = pm.StateMachine()
+    sm.capture(o)
+    with pm.record("Autograd backward", sm):
+        o.backward()
+    sm.render(path="media/autograd_backward.gif", title="Autograd Backward")

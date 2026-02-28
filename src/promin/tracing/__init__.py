@@ -1,6 +1,6 @@
 """Tracing internals and public tracing APIs."""
 
-from .registry import override_type_view_spec, register_type
+from .registry import TypeBuilder, type_builder
 from .trace import (
     FieldChange,
     NodeChange,
@@ -22,8 +22,7 @@ __all__ = [
     "Transition",
     "compute_transition",
     "record",
-    "register_type",
-    "override_type_view_spec",
+    "TypeBuilder",
+    "type_builder",
     "snapshot_objects",
 ]
-

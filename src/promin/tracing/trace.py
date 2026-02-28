@@ -3,7 +3,7 @@ promin.tracing.trace — Automatic state tracking via sys.settrace.
 
 Core pipeline::
 
-    1. register_type(...)              — declare which types to snapshot
+    1. type_builder(...)(cls)          — declare which types to snapshot
     2. StateMachine.init_state(root)   — capture initial state
     3. record(name, sm)                — trace execution, capture states
     4. sm.render()                     — visualize the state sequence
@@ -22,9 +22,9 @@ from typing import Any, Optional
 from ..render import RenderConfig, render_states, render_tree_text
 from .registry import (
     _registered_types,
-    override_type_view_spec,
-    register_type,
+    type_builder,
 )
+from ..view import type_view_to_dict
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +36,8 @@ __all__ = [
     "StateMachine",
     "Transition",
     "compute_transition",
-    "override_type_view_spec",
     "record",
-    "register_type",
+    "type_builder",
     "snapshot_objects",
 ]
 
@@ -60,14 +59,32 @@ class SourceLoc:
 # ---------------------------------------------------------------------------
 
 
-def _snapshot_values(snapshot: Any) -> Any:
-    """Strip ``_id``, ``_focused``, and ``_view`` from a snapshot, keeping only value content."""
+def _snapshot_values(snapshot: Any, seen: Optional[dict[int, Any]] = None) -> Any:
+    """Strip rendering metadata while preserving graph structure in a cycle-safe way."""
+    if seen is None:
+        seen = {}
+
     if isinstance(snapshot, (list, tuple)):
-        return [_snapshot_values(s) for s in snapshot]
-    if snapshot is None or not isinstance(snapshot, dict) or "_type" not in snapshot:
+        oid = id(snapshot)
+        if oid in seen:
+            return {"_ref": seen[oid]}
+        seen[oid] = f"seq:{len(seen)}"
+        return [_snapshot_values(s, seen) for s in snapshot]
+
+    if snapshot is None or not isinstance(snapshot, dict):
         return snapshot
+
+    oid = id(snapshot)
+    ref = snapshot.get("_id", f"dict:{len(seen)}")
+    if oid in seen:
+        return {"_ref": seen[oid]}
+    seen[oid] = ref
+
+    if "_type" not in snapshot:
+        return {k: _snapshot_values(v, seen) for k, v in snapshot.items()}
+
     return {
-        k: _snapshot_values(v)
+        k: _snapshot_values(v, seen)
         for k, v in snapshot.items()
         if k not in ("_id", "_focused", "_view")
     }
@@ -109,13 +126,9 @@ def _snapshot_obj_inner(
         "_type": info.type_name,
         "_id": oid,
         "_focused": (oid == focused_id) if focused_id else False,
-        "_view": info.view.to_dict(),
+        "_view": type_view_to_dict(info.view),
     }
     seen[oid] = node  # register before recursion (handles cycles / shared refs)
-    if info.label_resolver is not None:
-        label_field = info.view.label
-        if label_field:
-            node[label_field] = copy.deepcopy(info.label_resolver(obj))
 
     if info.children_resolver is not None:
         for field_name, child_val in info.children_resolver(obj).items():
@@ -136,13 +149,52 @@ def _snapshot_obj_inner(
 
     if info.data_resolver is not None:
         for field_name, data_val in info.data_resolver(obj).items():
-            node[field_name] = copy.deepcopy(data_val)
+            # Self-references in container/data content should be treated as
+            # plain values to avoid creating degenerate self-cycles.
+            if data_val is obj:
+                node[field_name] = copy.deepcopy(data_val)
+            elif field_name == "__content":
+                node[field_name] = _snapshot_inline_content(
+                    data_val, obj, focused_id, seen
+                )
+            else:
+                node[field_name] = _snapshot_obj_inner(data_val, focused_id, seen)
 
     for f in info.fields:
         if f in node:
             continue
         node[f] = _snapshot_obj_inner(getattr(obj, f, None), focused_id, seen)
     return node
+
+
+def _snapshot_inline_content(
+    value: Any,
+    owner: Any,
+    focused_id: Optional[int],
+    seen: dict[int, dict],
+) -> Any:
+    """
+    Snapshot container content with plain-list semantics.
+
+    Top-level list/tuple/dict wrappers stay as regular containers instead of
+    being interpreted as registered list views. Their element values still
+    recurse normally, so registered objects inside content are preserved.
+    """
+    if value is owner:
+        return copy.deepcopy(value)
+    if isinstance(value, list):
+        return [_snapshot_inline_content(v, owner, focused_id, seen) for v in value]
+    if isinstance(value, tuple):
+        return [_snapshot_inline_content(v, owner, focused_id, seen) for v in value]
+    if isinstance(value, dict):
+        return {
+            k: _snapshot_inline_content(v, owner, focused_id, seen)
+            for k, v in value.items()
+        }
+    info = _registered_types.get(type(value))
+    if info is not None and not info.focusable:
+        return copy.deepcopy(value)
+    return _snapshot_obj_inner(value, focused_id, seen)
 
 
 def snapshot_objects(objs: list[Any], focused_id: Optional[int] = None) -> list[Any]:
@@ -237,8 +289,11 @@ def _iter_snapshot_nodes(snapshot: Any):
 def _node_label(node: dict) -> Any:
     """Extract the display label value from a snapshot node using its ``_view``."""
     view = node.get("_view", {})
-    label_field = view.get("label", "")
-    return node.get(label_field) if label_field else None
+    content_field = view.get("container", {}).get("content_field", "")
+    if not content_field:
+        # fallback for old snapshots
+        content_field = view.get("container", {}).get("label", "")
+    return node.get(content_field) if content_field else None
 
 
 # --- snapshot walkers (all built on _iter_snapshot_nodes) -----------------
@@ -303,14 +358,17 @@ def compute_transition(old_snap: Any, new_snap: Any) -> Transition:
         new_n = new_nodes[nid]
         type_name = new_n.get("_type", "")
         label = _node_label(new_n)
-        # Determine which field is the label (identity) — exclude from diff
+        # Determine which field is the display content — exclude from diff
         view = new_n.get("_view", {})
-        label_field = view.get("label", "")
-        # Compare all non-meta, non-label fields
+        content_field = view.get("container", {}).get("content_field", "")
+        if not content_field:
+            # fallback for old snapshots
+            content_field = view.get("container", {}).get("label", "")
+        # Compare all non-meta, non-content fields
         all_fields = {
             k
             for k in list(old_n) + list(new_n)
-            if not k.startswith("_") and k != label_field
+            if not k.startswith("_") and k != content_field
         }
         for field in sorted(all_fields):
             old_val = _snapshot_values(old_n.get(field))
@@ -606,7 +664,7 @@ class _RecordContext:
         sys.settrace(self._trace)
         return self
 
-    def __exit__(self, *exc):
+    def __exit__(self, *_exc):
         sys.settrace(self._prev_trace)
         return False
 

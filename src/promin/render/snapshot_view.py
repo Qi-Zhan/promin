@@ -8,37 +8,47 @@ from ..view import View
 
 
 def _get_view(snapshot: dict) -> dict:
-    """Return the ``_view`` dict from a snapshot node, with defaults."""
-    view = snapshot.get("_view", {})
+    raw = snapshot.get("_view", {})
+    container = raw.get("container", {})
+    links = raw.get("links", {})
+    items = links.get("items", [])
     return {
-        "shape": view.get("shape", "circle"),
-        "label": view.get("label", ""),
-        "edges": [e["field"] for e in view.get("edges", [])],
-        "edge_specs": view.get("edges", []),
-        "color_field": view.get("color_field", ""),
-        "color_map": view.get("color_map", {}),
-        "layout": view.get("layout"),
-        "content_field": view.get("content_field", ""),
+        "container": {
+            "shape": container.get("shape"),
+            "layout": container.get("layout"),
+            "color_field": container.get("color_field", ""),
+            "color_map": container.get("color_map", {}),
+            "content_field": container.get("content_field", ""),
+        },
+        "links": {
+            "layout": links.get("layout"),
+            "items": items,
+        },
+        "shape": container.get("shape"),
+        "link_fields": [item.get("field") for item in items],
+        "link_specs": items,
+        "content_field": container.get("content_field", ""),
     }
 
 
 def _get_label(snapshot: dict) -> str:
     view = _get_view(snapshot)
-    label_field = view["label"]
-    if label_field and label_field in snapshot:
-        return _format_label_value(snapshot[label_field])
+    content_field = view["content_field"]
+    if content_field and content_field in snapshot:
+        return _format_label_value(snapshot[content_field], layout=view["container"].get("layout"))
     return str(snapshot.get("_type", "?"))
 
 
 def _get_node_color(snapshot: dict) -> Optional[str]:
     view = _get_view(snapshot)
-    color_field = view["color_field"]
+    c = view["container"]
+    color_field = c["color_field"]
     if not color_field:
         return None
     field_value = snapshot.get(color_field)
     if field_value is None:
         return None
-    color_map = view["color_map"]
+    color_map = c["color_map"]
     if color_map:
         return color_map.get(str(field_value))
     return str(field_value)
@@ -56,12 +66,25 @@ def _contrast_text_color(fill_hex: str) -> str:
     return MANIM_BLACK if luminance > 0.5 else WHITE
 
 
-def _format_label_value(val: Any) -> str:
+def _format_label_value(val: Any, layout: Any = None) -> str:
+    if isinstance(val, list):
+        # container.content list means "multiple displayed fields", not list-view semantics
+        parts = [_format_label_value(item, layout=None) for item in val]
+        if not parts:
+            return ""
+        if len(parts) == 1:
+            return parts[0]
+        kind = str(getattr(layout, "_promin_layout_kind", ""))
+        if "row" in kind:
+            return " | ".join(parts)
+        return "\n".join(parts)
     if isinstance(val, dict) and "_type" in val:
         inner_view = _get_view(val)
-        inner_label = inner_view["label"]
-        if inner_label and inner_label in val:
-            return _format_label_value(val[inner_label])
+        inner_content = inner_view["content_field"]
+        if inner_content and inner_content in val:
+            return _format_label_value(
+                val[inner_content], layout=inner_view["container"].get("layout")
+            )
         return str(val.get("_type", "?"))
     return View.format_value(val)
 
@@ -72,24 +95,67 @@ def _resolve_snapshot(snapshot: Any) -> Any:
     view = _get_view(snapshot)
     if view["shape"] is not None:
         return snapshot
-    label_field = view["label"]
-    if label_field and label_field in snapshot:
-        inner = snapshot[label_field]
+    # shape=None still keeps container semantics when content includes
+    # structured nodes (e.g. ["root", tree.root]).
+    if _first_structured_content_item(snapshot) is not None:
+        return snapshot
+    content_field = view["content_field"]
+    # fallback for old snapshots that still carry "label"
+    if not content_field:
+        content_field = view["container"].get("label", "")
+    if content_field and content_field in snapshot:
+        inner = snapshot[content_field]
         return _resolve_snapshot(inner)
     return None
 
 
 def _is_container_snapshot(snapshot: dict) -> bool:
     view = _get_view(snapshot)
-    if view["shape"] is None:
-        return False
     content_field = view["content_field"]
     if not content_field or content_field not in snapshot:
         return False
     inner = snapshot[content_field]
-    if not (isinstance(inner, dict) and "_type" in inner):
-        return False
-    return True
+    if isinstance(inner, dict) and "_type" in inner:
+        return True
+    if isinstance(inner, list):
+        return any(isinstance(item, dict) and "_type" in item for item in inner)
+    return False
+
+
+def _first_structured_content_item(snapshot: dict) -> Optional[dict]:
+    view = _get_view(snapshot)
+    content_field = view["content_field"]
+    if not content_field or content_field not in snapshot:
+        return None
+    inner = snapshot[content_field]
+    if isinstance(inner, dict) and "_type" in inner:
+        return inner
+    if isinstance(inner, list):
+        for item in inner:
+            if isinstance(item, dict) and "_type" in item:
+                return item
+    return None
+
+
+def _container_inline_label(snapshot: dict) -> str:
+    """Text-only content entries in container.content (e.g. ['root', node])."""
+    view = _get_view(snapshot)
+    content_field = view["content_field"]
+    if not content_field or content_field not in snapshot:
+        return ""
+    inner = snapshot[content_field]
+    if isinstance(inner, list):
+        parts: list[str] = []
+        for item in inner:
+            if isinstance(item, dict) and "_type" in item:
+                continue
+            formatted = _format_label_value(item, layout=view["container"].get("layout"))
+            if formatted:
+                parts.append(formatted)
+        return "\n".join(parts)
+    if isinstance(inner, dict) and "_type" in inner:
+        return ""
+    return _format_label_value(inner, layout=view["container"].get("layout"))
 
 
 def render_tree_text(snapshot: Any, indent: int = 0, prefix: str = "") -> str:
@@ -106,9 +172,9 @@ def render_tree_text(snapshot: Any, indent: int = 0, prefix: str = "") -> str:
     view = _get_view(snapshot)
 
     if view["shape"] is None:
-        label_field = view["label"]
-        if label_field and label_field in snapshot:
-            return render_tree_text(snapshot[label_field], indent, prefix)
+        content_field = view["content_field"]
+        if content_field and content_field in snapshot:
+            return render_tree_text(snapshot[content_field], indent, prefix)
         return f"{pad}{prefix}∅"
 
     if _is_container_snapshot(snapshot):
@@ -123,7 +189,8 @@ def render_tree_text(snapshot: Any, indent: int = 0, prefix: str = "") -> str:
     marker = "  ◀━━ CURRENT" if snapshot.get("_focused") else ""
     lines = [f"{pad}{prefix}[{view['shape']}]({label}){marker}"]
 
-    for f in view["edges"]:
+    for spec in view["link_specs"]:
+        f = spec["field"]
         if f in snapshot:
             child_val = snapshot[f]
             if isinstance(child_val, list):

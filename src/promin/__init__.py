@@ -1,11 +1,23 @@
 __version__ = "0.2.0"
 
-from typing import Callable
-
+from .layout import (
+    Anchor,
+    LinksLayoutContext,
+    Position,
+    column,
+    grid,
+    radial,
+    row,
+    tree,
+)
+from .render import (
+    render_states,
+    render_states_inline,
+    RenderConfig,
+)
 from .tracing import trace
 from .tracing.trace import (
-    register_type,
-    override_type_view_spec,
+    type_builder,
     snapshot_objects,
     State,
     SourceLoc,
@@ -17,7 +29,10 @@ from .tracing.trace import (
     record,
 )
 from .view import (
-    EdgeSpec,
+    ContainerSpec,
+    LinkSpec,
+    LinksBuilder,
+    LinksSpec,
     TypeViewSpec,
     StyleContext,
     View,
@@ -31,52 +46,30 @@ from .view import (
     TupleView,
     SetView,
     RegisteredClassView,
-)
-from .render import (
-    LayoutContext,
-    LayoutResult,
-    TreeLayout,
-    RowLayout,
-    ColumnLayout,
-    GridLayout,
-    RadialLayout,
-    render_states,
-    render_states_inline,
-    RenderConfig,
+    links,
 )
 
-
-def register_value_view(value_type: type, view_factory: Callable[[], View]) -> None:
-    """Override value rendering and optionally structural type-view behavior.
-
-    Example:
-        register_value_view(list, lambda: MyListView())
-    """
-    View.register(value_type, view_factory)
-    view = view_factory()
-    spec = view.type_view_spec()
-    if spec is not None:
-        override_type_view_spec(value_type, spec)
+# Public chain-style registration entrypoint.
+type = type_builder
 
 
 __all__ = [
+    "Anchor",
     "BoolView",
+    "ContainerSpec",
     "DictView",
-    "EdgeSpec",
     "FieldChange",
     "FloatView",
     "IntView",
-    "LayoutContext",
-    "LayoutResult",
+    "LinkSpec",
+    "LinksBuilder",
+    "LinksLayoutContext",
+    "LinksSpec",
     "ListView",
     "NodeChange",
     "NoneView",
+    "Position",
     "RegisteredClassView",
-    "TreeLayout",
-    "RowLayout",
-    "ColumnLayout",
-    "GridLayout",
-    "RadialLayout",
     "RenderConfig",
     "SetView",
     "SourceLoc",
@@ -88,13 +81,17 @@ __all__ = [
     "TupleView",
     "TypeViewSpec",
     "View",
+    "column",
     "compute_transition",
-    "override_type_view_spec",
+    "grid",
+    "radial",
     "record",
-    "register_type",
-    "register_value_view",
+    "links",
+    "type",
     "render_states",
     "render_states_inline",
+    "row",
     "snapshot_objects",
     "trace",
+    "tree",
 ]

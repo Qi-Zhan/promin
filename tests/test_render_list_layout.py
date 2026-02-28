@@ -17,5 +17,4 @@ def test_list_layout_wraps_when_too_many_elements():
     assert root is not None
     children = [c for c in root.children if c is not None]
     ys = {round(c.y, 4) for c in children}
-    # wrap should produce multiple rows (different y values)
     assert len(ys) > 1

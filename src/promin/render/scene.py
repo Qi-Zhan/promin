@@ -5,10 +5,10 @@ from typing import Any
 import numpy as np
 from manim import DOWN, GREY_A, RIGHT, FadeIn, FadeOut, Line, ReplacementTransform, Scene, Text, VGroup, VMobject
 
-from .geometry import _compute_bounding_box, _node_pos
+from .geometry import _node_pos
 from .layout_engine import LayoutNode, layout_tree
 from .mobjects import _make_edge, _make_node_mob
-from .types import ANIM_DURATION, CONTAINER_PADDING, RenderConfig, _NodeRenderInfo
+from .types import ANIM_DURATION, RenderConfig, _NodeRenderInfo
 
 
 def _collect_render_info(root: LayoutNode, origin: np.ndarray) -> dict[int, _NodeRenderInfo]:
@@ -16,30 +16,19 @@ def _collect_render_info(root: LayoutNode, origin: np.ndarray) -> dict[int, _Nod
 
     def walk(n: LayoutNode) -> None:
         if n.node_id is not None:
-            if n.content_type == "subtree" and n.content_root is not None:
-                x_min, x_max, y_min, y_max = _compute_bounding_box(n.content_root, origin)
-                pad = CONTAINER_PADDING
-                info[n.node_id] = _NodeRenderInfo(
-                    node_id=n.node_id,
-                    pos=np.array([(x_min + x_max) / 2, (y_min + y_max) / 2, 0.0]),
-                    shape=n.shape,
-                    fill_color=n.fill_color,
-                    focused=n.focused,
-                    width=max(x_max - x_min + pad * 2, 1.2),
-                    height=max(y_max - y_min + pad * 2, 0.9),
-                    type_label=n.type_label,
-                    z_index=-2,
-                )
-                walk(n.content_root)
-            else:
-                info[n.node_id] = _NodeRenderInfo(
-                    node_id=n.node_id,
-                    pos=_node_pos(n, origin),
-                    shape=n.shape,
-                    fill_color=n.fill_color,
-                    focused=n.focused,
-                    text=n.label,
-                )
+            info[n.node_id] = _NodeRenderInfo(
+                node_id=n.node_id,
+                pos=_node_pos(n, origin),
+                shape=n.shape,
+                fill_color=n.fill_color,
+                focused=n.focused,
+                text="",
+                width=n.box_width if n.shape is not None else None,
+                height=n.box_height if n.shape is not None else None,
+                type_label=n.type_label,
+                z_index=-2 if n.shape is not None else 0,
+                content_items=list(n.content_items),
+            )
         for c in n.children:
             if c is not None:
                 walk(c)
@@ -52,8 +41,6 @@ def _collect_layout_edges(root: LayoutNode) -> dict[tuple[int, int], str]:
     edges: dict[tuple[int, int], str] = {}
 
     def walk(n: LayoutNode) -> None:
-        if n.content_type == "subtree" and n.content_root is not None:
-            walk(n.content_root)
         for c, spec in zip(n.children, n.edge_styles):
             if c is not None and n.node_id is not None and c.node_id is not None:
                 edges[(n.node_id, c.node_id)] = spec.get("style", "solid")
@@ -126,7 +113,17 @@ class _ManimStateRenderer:
             pid, cid = eid
             style = new_edges[eid]
             p_info, c_info = new_info[pid], new_info[cid]
-            new_edge = _make_edge(p_info.pos, c_info.pos, style, p_info.shape, c_info.shape)
+            new_edge = _make_edge(
+                p_info.pos,
+                c_info.pos,
+                style,
+                p_info.shape,
+                c_info.shape,
+                width1=p_info.width,
+                height1=p_info.height,
+                width2=c_info.width,
+                height2=c_info.height,
+            )
             new_edge.set_z_index(-1)
             anims.append(ReplacementTransform(self._edge_mobs[eid], new_edge))
             self._edge_mobs[eid] = new_edge
@@ -139,7 +136,17 @@ class _ManimStateRenderer:
             pid, cid = eid
             style = new_edges[eid]
             p_info, c_info = new_info[pid], new_info[cid]
-            edge = _make_edge(p_info.pos, c_info.pos, style, p_info.shape, c_info.shape)
+            edge = _make_edge(
+                p_info.pos,
+                c_info.pos,
+                style,
+                p_info.shape,
+                c_info.shape,
+                width1=p_info.width,
+                height1=p_info.height,
+                width2=c_info.width,
+                height2=c_info.height,
+            )
             edge.set_z_index(-1)
             self._edge_mobs[eid] = edge
             anims.append(FadeIn(edge))
@@ -191,6 +198,7 @@ def _node_info_to_payload(info: _NodeRenderInfo) -> dict[str, Any]:
         "height": info.height,
         "type_label": info.type_label,
         "z_index": int(info.z_index),
+        "content_items": list(info.content_items),
     }
 
 
@@ -209,6 +217,7 @@ def _node_info_map_from_payload(payload: dict[str, Any]) -> dict[int, _NodeRende
             height=raw.get("height"),
             type_label=raw.get("type_label", ""),
             z_index=int(raw.get("z_index", 0)),
+            content_items=list(raw.get("content_items", [])),
         )
         out[info.node_id] = info
     return out

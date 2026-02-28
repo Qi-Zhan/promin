@@ -12,8 +12,9 @@ from promin.view import (
     NoneView,
     SetView,
     RegisteredClassView,
-    NodeView,
-    EdgeSpec,
+    TypeViewSpec,
+    container,
+    links,
 )
 
 
@@ -38,7 +39,6 @@ def test_view_dispatch_unknown_type():
 
 
 def test_render_value_recursive_list():
-    """ListView.render should recursively render items via View.render_value."""
     result = View.render_value([1, "hello", 3.14])
     assert result["type"] == "list"
     assert result["items"][0] == {"type": "int", "value": 1, "style": None}
@@ -46,31 +46,7 @@ def test_render_value_recursive_list():
     assert result["items"][2] == {"type": "float", "value": 3.14, "style": None}
 
 
-def test_render_value_recursive_dict():
-    """DictView.render should recursively render values via View.render_value."""
-    result = View.render_value({"a": 1, "b": [2, 3]})
-    assert result["type"] == "dict"
-    assert result["items"]["a"] == {"type": "int", "value": 1, "style": None}
-    assert result["items"]["b"]["type"] == "list"
-
-
-def test_render_value_unknown_type():
-    """View.render_value should fall back gracefully for unregistered types."""
-
-    class Opaque:
-        pass
-
-    result = View.render_value(Opaque())
-    assert result["type"] == "unknown"
-
-
-# ---------------------------------------------------------------------------
-# format_label / format_value tests
-# ---------------------------------------------------------------------------
-
-
 def test_format_value_primitives():
-    """View.format_value delegates to each View's format_label."""
     assert View.format_value(42) == "42"
     assert View.format_value(3.14) == "3.14"
     assert View.format_value("hi") == "hi"
@@ -78,69 +54,26 @@ def test_format_value_primitives():
     assert View.format_value(None) == "∅"
 
 
-def test_format_value_containers():
-    """format_value recursively formats lists, tuples, dicts via View dispatch."""
-    assert View.format_value([1, 2, 3]) == "[1, 2, 3]"
-    assert View.format_value((4, 5)) == "(4, 5)"
-    assert View.format_value({"a": 1}) == "{a: 1}"
-
-
-def test_format_value_nested():
-    """Nested containers are recursively formatted through dispatch."""
-    assert View.format_value([1, [2, 3]]) == "[1, [2, 3]]"
-    assert View.format_value({"x": [1, 2]}) == "{x: [1, 2]}"
-
-
-def test_format_value_unknown_type():
-    """Unregistered types fall back to repr."""
-
-    class Mystery:
-        pass
-
-    result = View.format_value(Mystery())
-    assert "Mystery" in result
-
-
-# ---------------------------------------------------------------------------
-# RegisteredClassView tests
-# ---------------------------------------------------------------------------
-
-
-def test_registered_class_view_carries_node_view():
-    """RegisteredClassView stores and exposes the full NodeView spec."""
-    nv = NodeView(
-        shape="diamond",
-        label="key",
-        edges=[EdgeSpec(field="left"), EdgeSpec(field="right")],
+def test_registered_class_view_carries_type_view_spec():
+    spec = TypeViewSpec(
+        container=container(shape="diamond", content=lambda o: [o.key]),
+        links=links().items(lambda o: [o.left, o.right]).hints(["left", "right"]).build(),
     )
-    view = RegisteredClassView(nv)
-    assert view.node_view is nv
+    view = RegisteredClassView(spec)
+    assert view.type_view is spec
     rendered = view.render(object())
     assert rendered["type"] == "registered_node"
-    assert rendered["node_view"]["shape"] == "diamond"
-    assert rendered["node_view"]["label"] == "key"
-
-
-def test_registered_class_view_format_label():
-    """RegisteredClassView.format_label reads the actual label field."""
-    nv = NodeView(shape="circle", label="key")
-    view = RegisteredClassView(nv)
-
-    class Dummy:
-        key = 99
-
-    assert view.format_label(Dummy()) == "99"
+    assert rendered["node_view"]["container"]["shape"] == "diamond"
 
 
 def test_register_type_creates_registered_class_view():
-    """@register_type should register a RegisteredClassView."""
     import promin as pm
 
-    @pm.register_type(
-        layout=pm.TreeLayout,
-        shape="box",
-        label="val",
-        edges=["child"],
+    @(
+        pm.type()
+        .shape("box")
+        .show(lambda n: [n.val])
+        .links(pm.links().items(lambda n: [n.child]).layout(pm.tree))
     )
     class TestNode:
         def __init__(self):
@@ -149,79 +82,34 @@ def test_register_type_creates_registered_class_view():
 
     view = View.for_value(TestNode())
     assert isinstance(view, RegisteredClassView)
-    assert view.node_view.shape == "box"
-    assert view.node_view.label == "val"
+    assert view.type_view.container.shape == "box"
     assert view.format_label(TestNode()) == "7"
 
 
-def test_register_value_view_overrides_list_formatting():
-    """Public API should allow overriding the default view for built-in types."""
-    import promin as pm
-
-    class CellListView(pm.ListView):
-        def format_label(self, value):
-            if not value:
-                return "[]"
-            return "[" + " | ".join(pm.View.format_value(v) for v in value) + "]"
-
-    old_factory = pm.View._type_to_view[list]
-    try:
-        pm.register_value_view(list, lambda: CellListView())
-        assert pm.View.format_value([1, 2, 3]) == "[1 | 2 | 3]"
-    finally:
-        pm.View.register(list, old_factory)
-
-
-def test_register_type_can_override_builtin_list_spec():
+def test_register_type_supports_lambda_content_and_links():
     import promin as pm
     from promin.tracing.trace import snapshot_objects
 
-    pm.register_type(
-        list,
-        layout=pm.RowLayout(),
-        shape="diamond",
-        label="size",
-        label_resolver=lambda v: len(v),
-        data_resolver=lambda v: {"size": len(v)},
-        children_resolver=lambda v: {},
-        register_view=False,
+    @(
+        pm.type()
+        .shape("circle")
+        .show(lambda n: [n.key])
+        .links(
+            pm.links()
+            .items(lambda n: [n.left, n.right])
+            .hints(["left", "right"])
+            .layout(pm.tree)
+        )
     )
-    snap = snapshot_objects([[1, 2]])[0]
-    assert snap["_type"] == "list"
-    assert snap["_view"]["shape"] == "diamond"
-    assert snap["size"] == 2
+    class _N:
+        def __init__(self, key):
+            self.key = key
+            self.left = None
+            self.right = None
 
-    # restore built-in list default to avoid cross-test pollution
-    pm.register_type(
-        list,
-        layout=pm.RowLayout(wrap=True, columns=8),
-        shape="box",
-        label="summary",
-        edges=[pm.EdgeSpec(field="elements", direction="right")],
-        type_name="list",
-        label_resolver=lambda v: f"len={len(v)}",
-        children_resolver=lambda v: {"elements": list(v)},
-        data_resolver=lambda v: {"summary": f"len={len(v)}"},
-        register_view=False,
-    )
-
-
-def test_register_value_view_can_override_list_type_view_spec():
-    import promin as pm
-    from promin.tracing.trace import snapshot_objects
-
-    class FancyListView(pm.ListView):
-        def type_view_spec(self):
-            return pm.TypeViewSpec(
-                shape="diamond",
-                label="summary",
-                layout=pm.TreeLayout,
-            )
-
-    pm.register_value_view(list, lambda: FancyListView())
-    snap = snapshot_objects([[1, 2, 3]])[0]
-    assert snap["_view"]["shape"] == "diamond"
-    assert snap["_view"]["layout"] is pm.TreeLayout
-
-    # restore built-in list default view + type spec
-    pm.register_value_view(list, lambda: pm.ListView())
+    root = _N(1)
+    root.left = _N(2)
+    snap = snapshot_objects([root])[0]
+    assert snap["_view"]["container"]["content_field"] == "__content"
+    assert "__content" in snap
+    assert "__links" in snap

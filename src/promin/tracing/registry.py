@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from ..render.layout_registry import RowLayout
+from ..layout import row
 from ..view import (
-    TypeViewSpec,
-    EdgeSpec,
-    normalize_edges,
-    View,
+    ContainerSpec,
+    LinksBuilder,
+    LinksSpec,
     RegisteredClassView,
+    TypeViewSpec,
+    View,
 )
 
 logger = logging.getLogger(__name__)
@@ -18,12 +19,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class _TypeInfo:
-    """Internal metadata for a registered type."""
-
     type_name: str
     view: TypeViewSpec
     skip_if: Optional[Callable] = None
-    label_resolver: Optional[Callable[[Any], Any]] = None
     children_resolver: Optional[Callable[[Any], dict[str, Any]]] = None
     data_resolver: Optional[Callable[[Any], dict[str, Any]]] = None
     focusable: bool = True
@@ -36,146 +34,252 @@ class _TypeInfo:
 _registered_types: dict[type, _TypeInfo] = {}
 
 
-def override_type_view_spec(value_type: type, view_spec: TypeViewSpec) -> bool:
-    info = _registered_types.get(value_type)
-    if info is None:
-        return False
-    if view_spec.layout is None:
-        raise TypeError(
-            "TypeViewSpec.layout is required. "
-            "Example: layout=pm.TreeLayout"
-        )
-    view_spec.layout = _validate_layout(view_spec.layout)
-    for edge in view_spec.edges:
-        if edge.layout is not None:
-            edge.layout = _validate_layout(edge.layout)
-    info.view = view_spec
-    return True
+def _validate_view(view_spec: TypeViewSpec) -> TypeViewSpec:
+    if not isinstance(view_spec, TypeViewSpec):
+        raise TypeError("view must be a TypeViewSpec instance")
+
+    c = view_spec.container
+    if c.shape is not None and not isinstance(c.shape, str):
+        raise TypeError("container.shape must be str | None")
+    if c.layout is not None and not callable(c.layout):
+        raise TypeError("container.layout must be callable")
+    if c.content is not None and not callable(c.content):
+        raise TypeError("container.content must be callable")
+    if c.color is not None and not callable(c.color):
+        raise TypeError("container.color must be callable")
+    if c.text_color is not None and not callable(c.text_color):
+        raise TypeError("container.text_color must be callable")
+
+    if view_spec.links.layout is not None and not callable(view_spec.links.layout):
+        raise TypeError("links.layout must be callable")
+    if view_spec.links.items_resolver is not None and not callable(view_spec.links.items_resolver):
+        raise TypeError("links.items resolver must be callable")
+    if view_spec.links.hints_resolver is not None and not callable(view_spec.links.hints_resolver):
+        raise TypeError("links.hints resolver must be callable")
+    for item in view_spec.links.items:
+        if not isinstance(item.field, str) or not item.field:
+            raise TypeError("link field must be a non-empty string")
+        if item.resolver is not None and not callable(item.resolver):
+            raise TypeError("link resolver must be callable")
+
+    return view_spec
 
 
-def _validate_layout(layout: Any):
-    if not callable(layout):
-        raise TypeError("layout must be callable: layout=pm.TreeLayout or layout=my_layout")
-    return layout
-
-
-def register_type(
-    cls: type | None = None,
+def _register_type_core(
+    target_cls: type,
     *,
-    layout: Callable[..., Any],
-    shape: Optional[str] = "circle",
-    label: str = "",
-    edges: list[str | EdgeSpec] | None = None,
+    view_spec: TypeViewSpec,
     type_name: str = "",
-    color_field: str = "",
-    color_map: dict[str, str] | None = None,
     skip_if: Optional[Callable] = None,
-    label_resolver: Optional[Callable[[Any], Any]] = None,
     children_resolver: Optional[Callable[[Any], dict[str, Any]]] = None,
     data_resolver: Optional[Callable[[Any], dict[str, Any]]] = None,
-    content_field: str | None = None,
     focusable: bool = True,
     register_view: bool = True,
-):
-    def _register(target_cls: type):
-        name = type_name or target_cls.__name__
-        if not callable(layout):
-            raise TypeError("layout must be callable: layout=pm.TreeLayout or layout=my_layout")
-        normalized_layout = _validate_layout(layout)
-        if content_field is not None and (
-            not isinstance(content_field, str) or not content_field
-        ):
-            raise TypeError("content_field must be a non-empty string when provided")
-        normalized_edges = normalize_edges(edges or [])
-        for edge in normalized_edges:
-            if edge.layout is not None:
-                if not callable(edge.layout):
+) -> type:
+    name = type_name or target_cls.__name__
+    view_spec = _validate_view(view_spec)
+
+    def _auto_content_data(obj: Any) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        if view_spec.container.color is not None:
+            out[view_spec.container.color_field_name] = view_spec.container.color(obj)
+        if view_spec.container.text_color is not None:
+            out[view_spec.container.text_color_field_name] = view_spec.container.text_color(obj)
+        if view_spec.container.content is not None:
+            content_val = view_spec.container.content(obj)
+            if not isinstance(content_val, list):
+                raise TypeError(
+                    f"{name}.container.content must return list, got "
+                    f"{type(content_val).__name__}"
+                )
+            out[view_spec.container.content_field_name] = content_val
+        return out
+
+    def _auto_content_children(obj: Any) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        if view_spec.links.items_resolver is not None:
+            raw = view_spec.links.items_resolver(obj)
+            if not isinstance(raw, list):
+                raise TypeError(
+                    f"{name}.links.items must return list, got {type(raw).__name__}"
+                )
+            hints: list[str] = []
+            if view_spec.links.hints_resolver is not None:
+                hints = view_spec.links.hints_resolver(obj)
+                if not isinstance(hints, list):
                     raise TypeError(
-                        "EdgeSpec.layout must be callable: layout=pm.RowLayout(...) or layout=my_layout"
+                        f"{name}.links.hints must return list, got {type(hints).__name__}"
                     )
-                edge.layout = _validate_layout(edge.layout)
+            packed: list[dict[str, Any]] = []
+            for i, item in enumerate(raw):
+                hint = hints[i] if i < len(hints) else "auto"
+                packed.append({"target": item, "_hint": hint, "_style": "solid"})
+            out["__links"] = packed
+        for item in view_spec.links.items:
+            if item.resolver is not None:
+                out[item.field] = item.resolver(obj)
+        return out
 
-        view = TypeViewSpec(
-            shape=shape,
-            label=label,
-            edges=normalized_edges,
-            color_field=color_field,
-            color_map=color_map or {},
-            layout=normalized_layout,
-            content_field=content_field or "",
+    effective_children_resolver = children_resolver
+    if children_resolver is None:
+        effective_children_resolver = _auto_content_children
+    else:
+        effective_children_resolver = lambda obj, _base=children_resolver: {
+            **(_auto_content_children(obj) or {}),
+            **(_base(obj) or {}),
+        }
+
+    effective_data_resolver = data_resolver
+    if data_resolver is None:
+        effective_data_resolver = _auto_content_data
+    else:
+        effective_data_resolver = lambda obj, _base=data_resolver: {
+            **(_auto_content_data(obj) or {}),
+            **(_base(obj) or {}),
+        }
+
+    _registered_types[target_cls] = _TypeInfo(
+        type_name=name,
+        view=view_spec,
+        skip_if=skip_if,
+        children_resolver=effective_children_resolver,
+        data_resolver=effective_data_resolver,
+        focusable=focusable,
+    )
+    logger.info(
+        "register_type: %s shape=%s links=%d",
+        name,
+        view_spec.container.shape,
+        (1 if view_spec.links.items_resolver is not None else 0) + len(view_spec.links.items),
+    )
+    if register_view:
+        View.register(target_cls, lambda v=view_spec: RegisteredClassView(v))
+    return target_cls
+
+
+@dataclass
+class TypeBuilder:
+    explicit_name: str | None = None
+    _container: ContainerSpec = field(default_factory=ContainerSpec)
+    _links: LinksSpec = field(default_factory=LinksSpec)
+    _skip_if: Optional[Callable] = None
+    _children_resolver: Optional[Callable[[Any], dict[str, Any]]] = None
+    _data_resolver: Optional[Callable[[Any], dict[str, Any]]] = None
+    _focusable: bool = True
+    _register_view: bool = True
+
+    def __call__(self, target_cls: type) -> type:
+        view_spec = TypeViewSpec(container=self._container, links=self._links)
+        return _register_type_core(
+            target_cls,
+            view_spec=view_spec,
+            type_name=self.explicit_name or "",
+            skip_if=self._skip_if,
+            children_resolver=self._children_resolver,
+            data_resolver=self._data_resolver,
+            focusable=self._focusable,
+            register_view=self._register_view,
         )
-        if view.content_field and view.content_field not in view.fields:
-            raise TypeError(
-                "content_field must reference a tracked field "
-                "(label, edge, color_field, or content_field)."
-            )
-        _registered_types[target_cls] = _TypeInfo(
-            type_name=name,
-            view=view,
-            skip_if=skip_if,
-            label_resolver=label_resolver,
-            children_resolver=children_resolver,
-            data_resolver=data_resolver,
-            focusable=focusable,
-        )
-        logger.info(
-            "register_type: %s shape=%s label=%s edges=%d",
-            name,
-            shape,
-            label,
-            len(view.edges),
-        )
-        if register_view:
-            View.register(target_cls, lambda v=view: RegisteredClassView(v))
-        return target_cls
 
-    if cls is not None:
-        return _register(cls)
+    def named(self, name: str) -> "TypeBuilder":
+        self.explicit_name = name
+        return self
 
-    def decorator(target_cls):
-        return _register(target_cls)
+    def shape(self, value: str | None) -> "TypeBuilder":
+        self._container.shape = value
+        return self
 
-    return decorator
+    def show(self, resolver: Callable[[Any], list[Any]]) -> "TypeBuilder":
+        self._container.content = resolver
+        return self
+
+    def fill(
+        self,
+        resolver: Callable[[Any], Any],
+        *,
+        map: Optional[dict[str, str]] = None,
+    ) -> "TypeBuilder":
+        self._container.color = resolver
+        self._container.color_map = dict(map or {})
+        return self
+
+    def text(
+        self,
+        resolver: Callable[[Any], Any],
+        *,
+        map: Optional[dict[str, str]] = None,
+    ) -> "TypeBuilder":
+        self._container.text_color = resolver
+        self._container.text_color_map = dict(map or {})
+        return self
+
+    def layout(self, layout: Callable[..., Any]) -> "TypeBuilder":
+        self._container.layout = layout
+        return self
+
+    def links(self, config: LinksBuilder) -> "TypeBuilder":
+        if not isinstance(config, LinksBuilder):
+            raise TypeError("type().links(...) expects pm.links() builder")
+        self._links = config.build()
+        return self
+
+    def skip_if(self, pred: Callable[[Any], bool]) -> "TypeBuilder":
+        self._skip_if = pred
+        return self
+
+    def focusable(self, enabled: bool) -> "TypeBuilder":
+        self._focusable = enabled
+        return self
+
+    def children(self, resolver: Callable[[Any], dict[str, Any]]) -> "TypeBuilder":
+        self._children_resolver = resolver
+        return self
+
+    def data(self, resolver: Callable[[Any], dict[str, Any]]) -> "TypeBuilder":
+        self._data_resolver = resolver
+        return self
+
+    def no_view_registration(self) -> "TypeBuilder":
+        self._register_view = False
+        return self
+
+def type_builder(type_name: str | None = None) -> TypeBuilder:
+    return TypeBuilder(explicit_name=type_name)
 
 
 def _register_builtin_types() -> None:
-    register_type(
+    _register_type_core(
         int,
-        layout=RowLayout(),
-        shape="box",
-        label="value",
+        view_spec=TypeViewSpec(
+            container=ContainerSpec(shape="box", content=lambda v: [v]),
+            links=LinksSpec(),
+        ),
         type_name="int",
-        label_resolver=lambda v: v,
         data_resolver=lambda v: {"value": v},
         focusable=False,
         register_view=False,
     )
-    register_type(
+    _register_type_core(
         bool,
-        layout=RowLayout(),
-        shape="diamond",
-        label="value",
+        view_spec=TypeViewSpec(
+            container=ContainerSpec(shape="diamond", content=lambda v: [v]),
+            links=LinksSpec(),
+        ),
         type_name="bool",
-        label_resolver=lambda v: v,
         data_resolver=lambda v: {"value": v},
         focusable=False,
         register_view=False,
     )
-    register_type(
+    _register_type_core(
         list,
-        layout=RowLayout(wrap=True, columns=8),
-        shape="box",
-        label="summary",
-        edges=[
-            EdgeSpec(
-                field="elements",
-                direction="right",
-                layout=RowLayout(wrap=True, columns=8),
-            )
-        ],
+        view_spec=TypeViewSpec(
+            container=ContainerSpec(shape="box", content=lambda v: [f"len={len(v)}"]),
+            links=LinksSpec(
+                items_resolver=lambda v: list(v),
+                layout=row(wrap=True, columns=8),
+            ),
+        ),
         type_name="list",
-        label_resolver=lambda v: f"len={len(v)}",
-        children_resolver=lambda v: {"elements": list(v)},
         data_resolver=lambda v: {"summary": f"len={len(v)}"},
         register_view=False,
     )

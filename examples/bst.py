@@ -8,11 +8,16 @@ Usage:
 import promin as pm
 
 
-@pm.register_type(
-    layout=pm.TreeLayout,
-    shape="circle",
-    label="key",
-    edges=["left", "right"],
+@(
+    pm.type()
+    .shape("circle")
+    .show(lambda n: [n.key])
+    .links(
+        pm.links()
+        .items(lambda n: [n.left, n.right])
+        .hints(["left", "right"])
+        .layout(pm.tree)
+    )
 )
 class BSTNode:
 

@@ -3,195 +3,51 @@
 ## Setup (uv)
 
 ```bash
-# Install project + runtime dependencies
 uv sync
-
-# Install development dependencies (pytest, etc.)
 uv sync --group dev
-```
-
-> Requires Python >= 3.10. If you don't have `uv` yet: https://docs.astral.sh/uv/
-
-## Common Commands
-
-```bash
-# Run tests
-uv run -m pytest
-
-# Run an example (small output)
-uv run python examples/rbtree.py
 ```
 
 ## Quick Start
 
-### 1. Declare your data structure
-
 ```python
 import promin as pm
 
-@pm.register_type(
-    layout=pm.TreeLayout,
-    shape="circle",
-    label="key",
-    edges=["left", "right"],
-    color_field="color",
+@(
+    pm.type()
+    .shape("circle")
+    .show(lambda n: [n.key])
+    .links(
+        pm.links()
+        .items(lambda n: [n.left, n.right])
+        .hints(["left", "right"])
+        .layout(pm.tree)
+    )
 )
-class RBNode:
-    def __init__(self, key: int, color: str = "red"):
-        self.key = key
-        self.color = color
-        self.left = None
-        self.right = None
+class BSTNode:
+    ...
 ```
 
-完整示例见 [`examples/rbtree.py`](examples/rbtree.py)。
+## Core API
 
-### 2. Record & Render
+- `pm.type(...).shape(...).show(...).fill(...).text(...).links(...)`
+- `pm.links().items(...).hints(...).layout(...)`
+- Built-in layouts: `pm.tree`, `pm.row(...)`, `pm.column()`, `pm.radial(...)`
+- Position primitives for custom layouts: `pm.Position`, `pm.Anchor`
+
+## Example
 
 ```python
-t = RedBlackTree()
-keys = [7, 3, 18, 10, 22, 8]
-
 sm = pm.StateMachine()
-t.insert(keys[0])
-sm.capture(t)
+sm.capture(root)
 
-with pm.record("RBTree insert", sm, trace_current=False):
-    for k in keys[1:]:
-        t.insert(k)
+with pm.record("Insert", sm):
+    root.insert(9)
 
-sm.render(
-    path="media/rbtree_insert.gif",
-)
+sm.render(path="media/bst_insert_9.gif")
 ```
 
-![RBTree Insert](media/rbtree_insert.gif)
-
-## How It Works
-
-1. **`@register_type`** — Tells promin which fields to track and how to draw
-   each node (shape, label field, edge fields).
-2. **`StateMachine.capture(root)`** — Registers live objects as snapshot roots.
-3. **`record(name, sm)`** — Traces execution via `sys.settrace`, capturing a
-   `State` every time a registered object is read or mutated.
-4. **`sm.render(path)`** — Generates a self-contained Manim scene and renders
-   it to video.  The renderer is fully data-driven — shapes, labels, and edges
-   are all derived from the `_view` metadata embedded in each snapshot.
-
-## `register_type` Parameters
-
-`layout` is required. Promin has **no default layout fallback**.
-
-| Parameter   | Type                        | Description                                    |
-|-------------|---------------------------- |------------------------------------------------|
-| `layout`    | `callable`                  | Required. `pm.TreeLayout` / `pm.RowLayout(...)` / custom function |
-| `shape`     | `str \| None`               | `"circle"`, `"box"`, `"diamond"`, or `None` (transparent wrapper) |
-| `label`     | `str`                       | Field name shown as text inside the shape       |
-| `edges`     | `list[str \| EdgeSpec]`     | Fields that are connections to other nodes       |
-| `color_field` | `str`                     | Optional field used for node color and tracked automatically |
-| `type_name` | `str`                       | Display name (defaults to class name)            |
-
-Only fields declared via `label` / `edges` / `color_field` / `content_field`
-are tracked. There is no extra tracked-field channel.
-
-### Override Built-in Type Views (`list`)
-
-You can override built-in types with the same API:
-
-```python
-import promin as pm
-
-pm.register_type(
-    list,
-    layout=pm.RowLayout(wrap=True, columns=8),
-    shape="box",
-    label="size",
-    label_resolver=lambda v: len(v),
-    data_resolver=lambda v: {"size": len(v)},
-    children_resolver=lambda v: {"elements": list(v)},
-)
-```
-
-If `layout` is missing, `register_type` raises `TypeError` immediately.
-
-### Custom Layout Plugin
-
-```python
-import promin as pm
-
-def stack_column(ctx: pm.LayoutContext) -> pm.LayoutResult:
-    positions = {}
-    for i, child in enumerate(ctx.children):
-        cid = child.get("node_id")
-        if cid is not None:
-            positions[cid] = (0.0, -(i + 1) * ctx.gap_y)
-    return pm.LayoutResult(positions=positions)
-
-@pm.register_type(
-    layout=stack_column,
-    shape="box",
-    label="top",
-)
-class Stack: ...
-```
-
-If you also want to override formatting/render dispatch, use
-`register_value_view`. When the custom view provides `type_view_spec()`,
-it will also replace the snapshot-side `TypeViewSpec` for that type.
-
-### `EdgeSpec`
-
-For fine-grained control over edge rendering:
-
-```python
-from promin import EdgeSpec
-
-@pm.register_type(
-    layout=pm.TreeLayout,
-    shape="box",
-    label="keys",
-    edges=[
-        EdgeSpec(field="left",  direction="left",  style="solid"),
-        EdgeSpec(field="right", direction="right", style="dashed"),
-    ],
-)
-class MyNode: ...
-```
-
-- **`direction`** — `"auto"`, `"left"`, `"right"`, `"down"`, `"up"`
-- **`style`** — `"solid"`, `"dashed"`, `"dotted"`
-- **`layout`** — optional per-edge layout override: any layout callable (e.g. `pm.RowLayout(...)`)
-
-### List Edges
-
-If an edge field holds a **list** of registered objects (e.g. a B+ tree's
-`children`), each list element becomes a separate child edge:
-
-```python
-@pm.register_type(
-    layout=pm.TreeLayout,
-    shape="box",
-    label="keys",
-    edges=[EdgeSpec(field="children")],
-)
-class BPInternal:
-    def __init__(self):
-        self.keys: list[int] = []
-        self.children: list = []
-```
-
-## Examples
-
-| File                    | Description                          | Output                       |
-|-------------------------|--------------------------------------|------------------------------|
-| `examples/rbtree.py`   | Red-Black tree insert                | `media/rbtree_insert.gif`    |
-| `examples/bst.py`      | Binary search tree insert & search   | `media/bst_*.gif`            |
-| `examples/bptree.py`   | B+ tree insert & search              | `media/bptree_*.gif`         |
-
-Run any example (videos are written to `media/`):
-
-```bash
-uv run python examples/rbtree.py    # → media/rbtree_insert.gif
-uv run python examples/bst.py       # → media/bst_search_4.gif, media/bst_insert_9.gif
-uv run python examples/bptree.py    # → media/bptree_insert.gif, media/bptree_search.gif
-```
+See:
+- `examples/bst.py`
+- `examples/rbtree.py`
+- `examples/stack.py`
+- `examples/autograd.py`

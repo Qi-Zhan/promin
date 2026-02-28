@@ -8,29 +8,23 @@ Usage:
 import promin as pm
 
 
-def _stack_column_layout(ctx: pm.LayoutContext) -> pm.LayoutResult:
-    positions: dict[int, tuple[float, float]] = {}
-    for i, child in enumerate(ctx.children):
-        cid = child.get("node_id")
-        if cid is None:
-            continue
-        positions[cid] = (0.0, -(i + 1) * ctx.gap_y)
-    return pm.LayoutResult(positions=positions)
-
-@pm.register_type(
-    layout=_stack_column_layout,
-    shape="box",
-    label="name",
-    edges=[
-        pm.EdgeSpec(
-            field="elements",
-            direction="down",
-            style="solid",
-            layout=_stack_column_layout,
+def _stack_column_layout(targets, origin, ctx):
+    out = []
+    for i, child in enumerate(targets):
+        out.append(
+            child.with_pos(pm.Position(x=origin.pos.x, y=origin.pos.y - (i + 1) * ctx.gap_y))
         )
-    ],
-    label_resolver=lambda s: "Stack",
-    children_resolver=lambda s: {"elements": list(s.items)},
+    return out
+
+@(
+    pm.type()
+    .shape("box")
+    .show(lambda s: ["Stack"])
+    .links(
+        pm.links()
+        .items(lambda s: list(s.items))
+        .layout(_stack_column_layout)
+    )
 )
 class Stack:
     def __init__(self):

@@ -3,9 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from manim import (
-    GREY_A,
     GREY_B,
-    UP,
     WHITE,
     Arrow,
     Circle,
@@ -38,12 +36,37 @@ from .types import (
 
 
 def _make_node_mob(info: _NodeRenderInfo) -> VGroup:
+    if info.shape is None:
+        parts: list[VMobject] = []
+        for item in info.content_items:
+            parts.extend(_make_content_item(info.pos, item))
+        if info.text and not info.content_items:
+            txt = Text(str(info.text), font="Menlo", font_size=18, color=WHITE)
+            txt.move_to(info.pos + np.array([0.0, 0.55, 0.0]))
+            parts.append(txt)
+        return VGroup(*parts)
+
     has_explicit_size = info.width is not None
+    # Dynamic width/height exists for both regular nodes and containers after layout refactor.
+    # Treat as container visuals only when content is genuinely laid out inside the shape.
+    is_container_visual = bool(
+        info.shape == "box"
+        and info.content_items
+        and (
+            len(info.content_items) > 1
+            or any(
+                abs(float(item.get("dx", 0.0))) > 1e-6
+                or abs(float(item.get("dy", 0.0))) > 1e-6
+                or item.get("kind") != "text"
+                for item in info.content_items
+            )
+        )
+    )
 
     if info.fill_color:
         fill = ManimColor(info.fill_color)
         stroke_c = ManimColor(info.fill_color)
-        if has_explicit_size:
+        if is_container_visual:
             opacity = CONTAINER_FILL_OPACITY
             stroke_w = CONTAINER_STROKE
         else:
@@ -59,7 +82,7 @@ def _make_node_mob(info: _NodeRenderInfo) -> VGroup:
         stroke_w = FOCUS_STROKE
         txt_color = WHITE
     else:
-        if has_explicit_size:
+        if is_container_visual:
             fill, stroke_c = GREY_B, GREY_B
             opacity = CONTAINER_FILL_OPACITY
             stroke_w = CONTAINER_STROKE
@@ -112,24 +135,85 @@ def _make_node_mob(info: _NodeRenderInfo) -> VGroup:
         txt = Text(str(info.text), font="Menlo", font_size=font_size, color=txt_color)
         txt.move_to(pos)
         parts.append(txt)
+    for item in info.content_items:
+        parts.extend(_make_content_item(info.pos, item))
 
     return VGroup(*parts)
+
+
+def _make_content_item(base_pos: np.ndarray, item: dict) -> list[VMobject]:
+    dx = float(item.get("dx", 0.0))
+    dy = float(item.get("dy", 0.0))
+    pos = base_pos + np.array([dx, dy, 0.0])
+    text = str(item.get("text", ""))
+    shape = item.get("shape")
+    fill_color = item.get("fill_color")
+    width = float(item.get("width", BOX_WIDTH))
+    height = float(item.get("height", BOX_HEIGHT))
+
+    if shape is None:
+        txt = Text(text, font="Menlo", font_size=18, color=WHITE)
+        txt.move_to(pos)
+        return [txt]
+
+    stroke = ManimColor(fill_color) if fill_color else WHITE
+    fill = ManimColor(fill_color) if fill_color else NORMAL_FILL
+    txt_color = _contrast_text_color(fill_color) if fill_color else WHITE
+
+    if shape == "circle":
+        body = Circle(
+            radius=max(width, height) / 2.0,
+            color=stroke,
+            fill_color=fill,
+            fill_opacity=0.85,
+            stroke_width=2.5,
+        )
+    elif shape == "diamond":
+        r = max(width, height) / 2.0
+        body = Polygon(
+            pos + np.array([0, r, 0]),
+            pos + np.array([r, 0, 0]),
+            pos + np.array([0, -r, 0]),
+            pos + np.array([-r, 0, 0]),
+            color=stroke,
+            fill_color=fill,
+            fill_opacity=0.85,
+            stroke_width=2.5,
+        )
+    else:
+        body = Rectangle(
+            width=width,
+            height=height,
+            color=stroke,
+            fill_color=fill,
+            fill_opacity=0.85,
+            stroke_width=2.5,
+        )
+    body.move_to(pos)
+    txt = Text(text, font="Menlo", font_size=16, color=txt_color)
+    txt.move_to(pos)
+    return [body, txt]
 
 
 def _make_edge(
     p1: np.ndarray,
     p2: np.ndarray,
     style: str = "solid",
-    shape1: str = "circle",
-    shape2: str = "circle",
+    shape1: str | None = "circle",
+    shape2: str | None = "circle",
+    *,
+    width1: float | None = None,
+    height1: float | None = None,
+    width2: float | None = None,
+    height2: float | None = None,
 ) -> Line:
     d = p2 - p1
     d_len = float(np.linalg.norm(d))
     if d_len < 1e-6:
         return Line(p1, p2, color=EDGE_COLOR, stroke_width=0)
     dn = d / d_len
-    start = p1 + _boundary_offset(shape1, dn)
-    end = p2 - _boundary_offset(shape2, dn)
+    start = p1 + _boundary_offset(shape1, dn, width=width1, height=height1)
+    end = p2 - _boundary_offset(shape2, dn, width=width2, height=height2)
 
     if style == "none":
         return Line(start, end, color=EDGE_COLOR, stroke_width=0)

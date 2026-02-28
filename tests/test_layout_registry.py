@@ -1,85 +1,69 @@
-import pytest
-
 import promin as pm
 from promin.render import layout_tree
 from promin.tracing.trace import snapshot_objects
 
 
-def test_custom_layout_callable_and_use_in_node_layout():
-    def zigzag(ctx: pm.LayoutContext) -> pm.LayoutResult:
-        out: dict[int, tuple[float, float]] = {}
-        for i, child in enumerate(ctx.children):
-            cid = child.get("node_id")
-            if cid is None:
-                continue
-            out[cid] = ((-1.0 if i % 2 else 1.0) * (i + 1), -(i + 1) * ctx.gap_y)
-        return pm.LayoutResult(positions=out)
-
-    @pm.register_type(
-        layout=zigzag,
-        shape="circle",
-        label="key",
-        edges=["a", "b"],
+@(
+    pm.type()
+    .shape("circle")
+    .show(lambda n: [n.key])
+    .links(
+        pm.links()
+        .items(lambda n: [n.left, n.right])
+        .hints(["left", "right"])
+        .layout(pm.tree)
     )
-    class _Node:
-        def __init__(self):
-            self.key = 1
-            self.a = _Leaf(2)
-            self.b = _Leaf(3)
+)
+class _TreeNode:
+    def __init__(self, key: int):
+        self.key = key
+        self.left = None
+        self.right = None
 
-    @pm.register_type(
-        layout=pm.RowLayout(),
-        shape="box",
-        label="v",
-    )
-    class _Leaf:
-        def __init__(self, v: int):
-            self.v = v
 
-    root = _Node()
+def test_tree_layout_uses_link_hints_for_left_right_split():
+    root = _TreeNode(1)
+    root.left = _TreeNode(2)
+    root.right = _TreeNode(3)
+
     snap = snapshot_objects([root])[0]
     lr = layout_tree(snap)
     assert lr is not None
-    xs = [c.x for c in lr.children if c is not None]
-    assert len(xs) == 2
-    assert xs[0] != xs[1]
+    children = [c for c in lr.children if c is not None]
+    assert len(children) == 2
+
+    by_label = {c.label: c for c in children}
+    assert by_label["2"].x < 0.0
+    assert by_label["3"].x > 0.0
 
 
-def test_unknown_builtin_layout_kind_raises():
-    @pm.register_type(
-        layout=pm.TreeLayout,
-        shape="circle",
-        label="key",
-        edges=["left"],
+def test_custom_links_position_layout_function_applies_coordinates():
+    def custom_links_layout(targets, origin, ctx):
+        out = []
+        for i, t in enumerate(targets):
+            out.append(t.with_pos(pm.Position(origin.pos.x, origin.pos.y - (i + 1) * 2.0)))
+        return out
+
+    @(
+        pm.type()
+        .shape("circle")
+        .show(lambda n: [n.key])
+        .links(
+            pm.links()
+            .items(lambda n: [n.a, n.b])
+            .layout(custom_links_layout)
+        )
     )
     class _N:
         def __init__(self):
             self.key = 1
-            self.left = None
+            self.a = _TreeNode(10)
+            self.b = _TreeNode(20)
 
-    n = _N()
-    n.left = _N()
-    snap = snapshot_objects([n])[0]
-    snap["_view"]["layout"] = object()
-    with pytest.raises(TypeError, match="must be callable"):
-        layout_tree(snap)
-
-
-def test_register_layout_removed_from_public_api():
-    assert not hasattr(pm, "register_layout")
-
-
-def test_register_type_rejects_dict_layout():
-    @pm.register_type(
-        layout=pm.TreeLayout,
-        shape="circle",
-        label="key",
-    )
-    class _Tmp:
-        def __init__(self):
-            self.key = 1
-
-    with pytest.raises(TypeError, match="must be callable"):
-        pm.register_type(layout={"name": "tree", "params": {}}, shape="circle", label="key")(
-            _Tmp
-        )
+    snap = snapshot_objects([_N()])[0]
+    root = layout_tree(snap)
+    assert root is not None
+    children = [c for c in root.children if c is not None]
+    assert len(children) == 2
+    assert children[0].x == children[1].x
+    assert children[0].y > children[1].y
