@@ -8,11 +8,11 @@ version = "0.1.0"
 description = "Program-driven animation from runtime semantics"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
-dependencies = ["manim>=0.18"]
-
-[dependency-groups]
-dev = ["pytest"]
+requires-python = ">=3.12"
+dependencies = [
+    "manim>=0.18",
+    "pytest>=9.0.2",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/promin"]
