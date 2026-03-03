@@ -330,7 +330,7 @@ if __name__ == "__main__":
     sm = pm.StateMachine()
     # Capture the whole tree (shape=None wrapper auto-unwraps to root)
     t.insert(keys[0])
-    sm.capture(t)
+    sm.watch(t)
 
     with pm.record("RBTree insert", sm, trace_current=False):
         for k in keys[1:]:

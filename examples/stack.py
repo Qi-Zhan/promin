@@ -50,7 +50,7 @@ class Stack:
 if __name__ == "__main__":
     stack = Stack()
     sm = pm.StateMachine()
-    sm.capture(stack)
+    sm.watch(stack)
 
     with pm.record("Stack operations", sm):
         stack.push(10)

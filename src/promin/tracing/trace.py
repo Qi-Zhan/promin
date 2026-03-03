@@ -452,7 +452,7 @@ class StateMachine:
         self.states: list[State] = []
         self.captured_objects: list[Any] = []
 
-    def capture(self, root: Any) -> None:
+    def watch(self, root: Any) -> None:
         self.captured_objects.append(root)
 
     def init(self):

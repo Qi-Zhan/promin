@@ -206,7 +206,7 @@ def neuron_example():
 if __name__ == "__main__":
     o, _ = neuron_example()
     sm = pm.StateMachine()
-    sm.capture(o)
+    sm.watch(o)
     with pm.record("Autograd backward", sm):
         o.backward()
     sm.render(path="media/autograd_backward.gif", title="Autograd Backward")

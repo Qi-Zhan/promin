@@ -68,13 +68,13 @@ if __name__ == "__main__":
     data = [5, 3, 7, 1, 4, 6, 8]
     root = bst_build(data)
     sm = pm.StateMachine()
-    sm.capture(root)
+    sm.watch(root)
     with pm.record("Search for 4", sm):
         root.search(4)
     sm.render(path="media/bst_search_4.gif")
 
     sm = pm.StateMachine()
-    sm.capture(root)
+    sm.watch(root)
     with pm.record("Insert for 9", sm):
         root.insert(9)
     sm.render(path="media/bst_insert_9.gif")

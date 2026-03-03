@@ -45,7 +45,7 @@ class HybridNode:
 if __name__ == "__main__":
     root = HybridNode(1, 50, "root", 10)
     sm = pm.StateMachine()
-    sm.capture(root)
+    sm.watch(root)
 
     nodes = [
         HybridNode(2, 30, "L", 7),

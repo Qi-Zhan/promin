@@ -38,7 +38,7 @@ class BSTNode:
 
 ```python
 sm = pm.StateMachine()
-sm.capture(root)
+sm.watch(root)
 
 with pm.record("Insert", sm):
     root.insert(9)
