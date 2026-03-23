@@ -1,6 +1,6 @@
 import numpy as np
 
-from promin.render import _make_edge
+from flowviz.render import _make_edge
 
 
 def test_box_vertical_edge_anchors_to_bottom_and_top_faces():

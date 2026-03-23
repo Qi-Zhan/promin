@@ -1,6 +1,6 @@
-import promin as pm
-from promin.render import layout_tree
-from promin.tracing.trace import snapshot_objects
+import flowviz as pm
+from flowviz.render import layout_tree
+from flowviz.tracing.trace import snapshot_objects
 
 
 @(

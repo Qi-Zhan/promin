@@ -74,7 +74,7 @@ def _format_label_value(val: Any, layout: Any = None) -> str:
             return ""
         if len(parts) == 1:
             return parts[0]
-        kind = str(getattr(layout, "_promin_layout_kind", ""))
+        kind = str(getattr(layout, "_flowviz_layout_kind", ""))
         if "row" in kind:
             return " | ".join(parts)
         return "\n".join(parts)

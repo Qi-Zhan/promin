@@ -35,8 +35,8 @@ def render_states(
 
     scene_src = _generate_scene_source(states, title=title, config=cfg)
 
-    with tempfile.TemporaryDirectory(prefix="promin_") as tmp:
-        script = Path(tmp) / "_promin_scene.py"
+    with tempfile.TemporaryDirectory(prefix="flowviz_") as tmp:
+        script = Path(tmp) / "_flowviz_scene.py"
         script.write_text(scene_src, encoding="utf-8")
 
         quality_flag = f"-q{cfg.quality}"
@@ -55,7 +55,7 @@ def render_states(
             "-o",
             output_name,
             str(script),
-            "ProminScene",
+            "FlowvizScene",
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
@@ -107,9 +107,9 @@ def _generate_scene_source(
     header = [
         "from __future__ import annotations",
         "import json",
-        "import promin as pm",
+        "import flowviz as pm",
         "from manim import *",
-        "from promin.render import (",
+        "from flowviz.render import (",
         "    _ManimStateRenderer,",
         "    RenderConfig,",
         ")",
@@ -120,7 +120,7 @@ def _generate_scene_source(
 
     scene_src = textwrap.dedent(
         f"""\
-        class ProminScene(Scene):
+        class FlowvizScene(Scene):
             def construct(self):
                 {bg_line}
                 title_text = {title!r}

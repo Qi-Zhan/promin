@@ -1,6 +1,6 @@
 import pytest
 
-import promin as pm
+import flowviz as pm
 
 
 def test_type_builder_rejects_invalid_container_shape():

@@ -1,16 +1,15 @@
-# promin: Automatic program visualization powered by Manim.
+# flowviz: Automatic program visualization powered by Manim.
 
 ## Setup (uv)
 
 ```bash
 uv sync
-uv sync --group dev
 ```
 
 ## Quick Start
 
 ```python
-import promin as pm
+import flowviz as pm
 
 @(
     pm.type()

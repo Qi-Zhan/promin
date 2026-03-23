@@ -1,11 +1,11 @@
 """
-Example: Stack (list-backed) with promin visualization.
+Example: Stack (list-backed) with flowviz visualization.
 
 Usage:
     uv run python examples/stack.py
 """
 
-import promin as pm
+import flowviz as pm
 
 
 def _stack_column_layout(targets, origin, ctx):

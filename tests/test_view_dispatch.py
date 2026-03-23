@@ -1,6 +1,6 @@
 import pytest
 
-from promin.view import (
+from flowviz.view import (
     View,
     IntView,
     FloatView,
@@ -67,7 +67,7 @@ def test_registered_class_view_carries_type_view_spec():
 
 
 def test_register_type_creates_registered_class_view():
-    import promin as pm
+    import flowviz as pm
 
     @(
         pm.type()
@@ -87,8 +87,8 @@ def test_register_type_creates_registered_class_view():
 
 
 def test_register_type_supports_lambda_content_and_links():
-    import promin as pm
-    from promin.tracing.trace import snapshot_objects
+    import flowviz as pm
+    from flowviz.tracing.trace import snapshot_objects
 
     @(
         pm.type()

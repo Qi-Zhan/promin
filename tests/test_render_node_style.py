@@ -1,7 +1,7 @@
 import numpy as np
 
-from promin.render.mobjects import _make_node_mob
-from promin.render.types import _NodeRenderInfo
+from flowviz.render.mobjects import _make_node_mob
+from flowviz.render.types import _NodeRenderInfo
 
 
 def test_colored_circle_node_keeps_solid_fill_style():

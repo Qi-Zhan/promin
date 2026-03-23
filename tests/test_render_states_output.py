@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from promin import render
-from promin.render import runtime
+from flowviz import render
+from flowviz.render import runtime
 
 
 def test_render_states_requests_and_moves_gif(monkeypatch, tmp_path):
@@ -17,7 +17,7 @@ def test_render_states_requests_and_moves_gif(monkeypatch, tmp_path):
         media_dir = Path(cmd[cmd.index("--media_dir") + 1])
         output_name = cmd[cmd.index("-o") + 1]
         fmt = cmd[cmd.index("--format") + 1]
-        produced = media_dir / "videos" / "ProminScene" / f"{output_name}.{fmt}"
+        produced = media_dir / "videos" / "FlowvizScene" / f"{output_name}.{fmt}"
         produced.parent.mkdir(parents=True, exist_ok=True)
         produced.write_bytes(b"GIF89a")
         return _Result()

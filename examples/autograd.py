@@ -1,11 +1,11 @@
 """
-Autograd (micrograd-style) visualization with promin.
+Autograd (micrograd-style) visualization with flowviz.
 
 Usage:
     uv run python examples/autograd.py
 """
 
-import promin as pm
+import flowviz as pm
 
 
 # ══════════════════════════════════════════════════════════════════════

@@ -3,8 +3,8 @@ requires = ["hatchling>=1.25.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "promin"
-version = "0.1.0"
+name = "flowviz"
+version = "0.2.0"
 description = "Program-driven animation from runtime semantics"
 readme = "README.md"
 license = "MIT"
@@ -15,4 +15,4 @@ dependencies = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/promin"]
+packages = ["src/flowviz"]

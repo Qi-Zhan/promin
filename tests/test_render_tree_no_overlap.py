@@ -1,7 +1,7 @@
-from promin.render import layout_tree
-from promin.render.layout_engine import _flatten_nodes
-from promin.render.types import H_GAP
-from promin.tracing.trace import snapshot_objects
+from flowviz.render import layout_tree
+from flowviz.render.layout_engine import _flatten_nodes
+from flowviz.render.types import H_GAP
+from flowviz.tracing.trace import snapshot_objects
 
 
 def test_tree_layout_does_not_overlap_cross_grandchildren():
@@ -11,7 +11,7 @@ def test_tree_layout_does_not_overlap_cross_grandchildren():
             self.left = None
             self.right = None
 
-    import promin as pm
+    import flowviz as pm
 
     (
         pm.type()
@@ -61,7 +61,7 @@ def test_tree_layout_keeps_large_container_nodes_non_overlapping():
             self.left = None
             self.right = None
 
-    import promin as pm
+    import flowviz as pm
 
     (
         pm.type()

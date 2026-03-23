@@ -5,7 +5,7 @@ Usage:
     uv run python examples/container_and_links_layout.py
 """
 
-import promin as pm
+import flowviz as pm
 
 
 @(

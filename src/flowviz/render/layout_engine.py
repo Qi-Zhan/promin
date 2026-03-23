@@ -304,7 +304,7 @@ def _assign_positions(node: LayoutNode, depth: int) -> None:
             child.x = float(anchor.pos.x)
             child.y = float(anchor.pos.y)
             next_gap_x = local_gap_x
-            if getattr(layout_fn, "_promin_layout_kind", "") == "links_tree":
+            if getattr(layout_fn, "_flowviz_layout_kind", "") == "links_tree":
                 next_gap_x = max(local_gap_x, local_gap_x * 0.75)
             walk(child, next_gap_x, level + 1)
 

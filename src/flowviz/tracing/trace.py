@@ -1,5 +1,5 @@
 """
-promin.tracing.trace — Automatic state tracking via sys.settrace.
+flowviz.tracing.trace — Automatic state tracking via sys.settrace.
 
 Core pipeline::
 

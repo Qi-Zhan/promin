@@ -1,4 +1,4 @@
-from promin import trace
+from flowviz import trace
 
 
 def test_render_video_path_keeps_mp4_suffix(monkeypatch):

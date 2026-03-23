@@ -1,5 +1,5 @@
-from promin.tracing.trace import snapshot_objects
-import promin as pm
+from flowviz.tracing.trace import snapshot_objects
+import flowviz as pm
 
 
 def test_int_and_bool_snapshot_as_nodes():

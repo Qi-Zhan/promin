@@ -11,7 +11,7 @@ LinksLayoutFn = Callable[[list[Anchor], Anchor, object], list[Anchor]]
 
 
 def _mark_layout(fn: Callable, kind: str) -> Callable:
-    setattr(fn, "_promin_layout_kind", kind)
+    setattr(fn, "_flowviz_layout_kind", kind)
     return fn
 
 

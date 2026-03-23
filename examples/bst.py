@@ -5,7 +5,7 @@ Usage:
     python examples/bst.py
 """
 
-import promin as pm
+import flowviz as pm
 
 
 @(
